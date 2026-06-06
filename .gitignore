@@ -1,7 +1,3 @@
-# Upstream clones (enactic) — managed as separate repos
-openarm_description/
-openarm_teleop/
-
 # Generated outputs
 outputs/
 
