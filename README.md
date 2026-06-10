@@ -20,6 +20,8 @@ bash scripts/launch_unilateral.sh right_arm can_lead_r can_fol_r   # 右腕 tele
 # 両腕同時: bash scripts/launch_bimanual.sh        停止: Ctrl-C（全 bus disable）
 ```
 
+> **初回のみ**: 役割タグ未設定（新品）のアダプタは先に焼く → `sudo bash scripts/burn_channel_id.sh <iface> leader`（or `follower`）。既に焼いてあるアダプタはそのままでよい（channel_id はアダプタ NVRAM に保持され、別PCでも残る）。
+
 ## CAN 識別方式（なぜポート非依存か）
 
 leader/follower は **アダプタに焼いた channel_id**（役割タグ）＋ **dev_id**（チャンネル）で固定する。USBポートには依存しない。
@@ -34,6 +36,10 @@ leader/follower は **アダプタに焼いた channel_id**（役割タグ）＋
 - **canup.sh** … 実行時に channel_id を読んでリネーム。udev 未導入や hotplug 競合時の確実な保険。teleop 起動ラッパが内部で呼ぶ。
 
 > 逆転・流動的に崩れる根本原理（カーネル採番揺れ / udev がアダプタを識別できない / USBポートキーの限界）は [docs/can-naming-principle.md](docs/can-naming-principle.md) を参照。
+
+**固定名は teleop 専用ではなく、CAN を使う全タスク共通の土台。** モータ診断・データ収録・グリッパ較正・将来の WBC/policy 実機デプロイなど、どれも同じ4本のバスを開く。**新規スクリプトは生の `can0..3` を決め打ちせず、必ず固定名（`can_lead_r` 等）で参照すること**（生名は USB認識順で揺れる）。`canup.sh`/udev で固定名を付けた後は、どのタスクも名前を書くだけで正しい物理アームに当たる。
+
+> 補足: 2種類のIDは別物。**channel_id**＝アダプタ（どの役割/アーム）、**モータID `0x01..0x08`**＝バス上のどの関節（J1..J7+グリッパ、各モータに固定）。正しいバスを固定名で開けば、関節はモータIDで正しく当たる。
 
 ## 新しいアダプタの役割タグを焼く / 変える
 
