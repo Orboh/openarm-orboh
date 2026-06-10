@@ -68,5 +68,8 @@ can_fol_r  ch=44444444 port=3-7   ← 本来 leader のアダプタが can_fol_ 
 [up] can_lead_r channel_id=44444444 port=3-7   ← ポートが変わっても leader は 44444444 のまま
 [up] can_fol_r  channel_id=22222222 port=3-8
 ```
-→ ポート非依存で固定名が channel_id に追従。続けて teleop を起動すると leader/follower が正しい。
-（(b) の teleop 本確認は実機で実施・結果を追記予定。別PCでの確認は今後。）
+→ ポート非依存で固定名が channel_id に追従（名前が完全スワップしていたが、canup.sh の temp名2パスで衝突なく訂正。`[stage]→[rename]` で can_fol_*↔can_lead_* を入替）。
+- **unilateral 右**（`10_launch_unilateral.sh right_arm can_lead_r can_fol_r`）: leader/follower の逆転なし（OK）。
+- **bimanual**（`16_launch_bimanual.sh`）: 右・左とも `Arm motor count: 7`、右 leader→右 follower / 左 leader→左 follower で追従、leader/follower・L/R とも逆転/取り違えなし（OK）。
+
+→ **このPCでは、USBポートを入れ替えても channel_id 方式で leader/follower・L/R が崩れないことを実機確認**（unilateral＋bimanual, 2026-06-10）。残: 別PCでの確認（同梱の udev ルール/`canup.sh` をそのPCに入れて同手順）。
