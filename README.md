@@ -33,6 +33,8 @@ leader/follower は **アダプタに焼いた channel_id**（役割タグ）＋
 - **udev ルール** … `udev/80-openarm-can.rules` を `install_can_rules.sh` で導入。挿すと自動で固定名（PCごと1回）。
 - **canup.sh** … 実行時に channel_id を読んでリネーム。udev 未導入や hotplug 競合時の確実な保険。teleop 起動ラッパが内部で呼ぶ。
 
+> 逆転・流動的に崩れる根本原理（カーネル採番揺れ / udev がアダプタを識別できない / USBポートキーの限界）は [docs/can-naming-principle.md](docs/can-naming-principle.md) を参照。
+
 ## 新しいアダプタの役割タグを焼く / 変える
 
 channel_id は NVRAM 設定で**いつでも変更可**（後勝ち・別PCでも保持）。
