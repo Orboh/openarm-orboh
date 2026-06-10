@@ -1,0 +1,15 @@
+# OpenArm CAN 固定名 udev ルール（channel_id + dev_id キー）
+#
+# ねらい: USBポートに依存せず、別PC・別ポートに挿しても leader/follower が固定される。
+#   - channel_id  : PEAK アダプタの NVRAM に焼いた「役割タグ」。アダプタと一緒に移動する。
+#                   leader アダプタ = 44444444 / follower アダプタ = 22222222
+#                   （scripts/burn_channel_id.sh で焼く/変更する。値を変えたらこのファイルも合わせる）
+#   - dev_id      : アダプタ内チャンネル。0x0 = 右(R) / 0x1 = 左(L)。
+#
+# 導入: sudo bash scripts/install_can_rules.sh （PCごと1回）
+# 注意: hotplug 直後は channel_id の sysfs 反映が間に合わずこのルールが空振りすることがある。
+#       その場合は scripts/canup.sh（実行時に channel_id を読んで固定名へリネーム）を使う。
+SUBSYSTEM=="net", ACTION=="add", KERNEL=="can*", ATTR{peak_usb/can_channel_id}=="44444444", ATTR{dev_id}=="0x0", NAME="can_lead_r"
+SUBSYSTEM=="net", ACTION=="add", KERNEL=="can*", ATTR{peak_usb/can_channel_id}=="44444444", ATTR{dev_id}=="0x1", NAME="can_lead_l"
+SUBSYSTEM=="net", ACTION=="add", KERNEL=="can*", ATTR{peak_usb/can_channel_id}=="22222222", ATTR{dev_id}=="0x0", NAME="can_fol_r"
+SUBSYSTEM=="net", ACTION=="add", KERNEL=="can*", ATTR{peak_usb/can_channel_id}=="22222222", ATTR{dev_id}=="0x1", NAME="can_fol_l"
