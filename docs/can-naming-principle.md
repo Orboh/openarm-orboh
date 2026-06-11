@@ -73,3 +73,15 @@ can_fol_r  ch=44444444 port=3-7   ← 本来 leader のアダプタが can_fol_ 
 - **bimanual**（`16_launch_bimanual.sh`）: 右・左とも `Arm motor count: 7`、右 leader→右 follower / 左 leader→左 follower で追従、leader/follower・L/R とも逆転/取り違えなし（OK）。
 
 → **このPCでは、USBポートを入れ替えても channel_id 方式で leader/follower・L/R が崩れないことを実機確認**（unilateral＋bimanual, 2026-06-10）。残: 別PCでの確認（同梱の udev ルール/`canup.sh` をそのPCに入れて同手順）。
+
+## 検証2（別PC: Jetson Thor・aarch64, 2026-06-10）
+
+別PC移植性の確認として Jetson Thor（Ubuntu 24.04 noble / aarch64 / kernel `6.8.12-tegra`）で同手順を実施。
+
+前提（Jetson 固有・1回だけ）: Jetson のカーネルは `CONFIG_CAN_PEAK_USB` 未設定で PEAK ドライバを持たない。mainline v6.8.12 の `drivers/net/can/usb/peak_usb/` ソース6ファイルを kernel headers（`nvidia-l4t-kernel-headers` の build ツリー）に対して外部ビルドし、`/lib/modules/$(uname -r)/updates/` へ設置 + `depmod -a` で永続化（ブート約8秒で自動ロード・PEAK挿入で自動attachを確認。未署名モジュールのため dmesg に taint 表示が出るが動作に影響なし）。
+
+- PEAK 2台（このPCで検証したものと同一個体）を Thor の任意ポートへ移設（内蔵ハブ配下 `1-4.x` でも2台4ch認識）。channel_id は NVRAM からそのまま読めた＝**アダプタと一緒に移動し再焼き不要であることを実証**。
+- `sudo bash scripts/canup.sh` → `[up] can_lead_r/l channel_id=44444444` / `[up] can_fol_r/l channel_id=22222222`（4ch UP。Thor 内蔵 CAN `can0-3`=mttcan には不干渉）。
+- **再起動 + leader/follower のポート完全スワップ**（lead: `1-4.2`→`1-4.1` / fol: `1-4.1`→`1-4.2`）後に `canup.sh` を再実行 → 固定名が channel_id に追従して同じ役割に付与。temp名2パスがスワップ状態でも正常動作。
+
+→ **x86_64（このPC）に続き aarch64（Jetson Thor）でも、USBポート・再起動・PC・アーキに依存せず channel_id 方式の命名が成立**。`setup.sh`（teleop ビルド）は未実施（Thor にアーム未接続のため命名検証まで。ROS jazzy + OpenArm PPA の arm64 対応は別途確認）。
