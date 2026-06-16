@@ -70,6 +70,21 @@ sudo bash scripts/burn_channel_id.sh <iface> follower    # 22222222
 
 値を変えたら `udev/80-openarm-can.rules` と `scripts/canup.sh` の channel_id も合わせること。
 
+## モータ状態の確認（motorcheck / motor_status）
+
+CAN（バス）が健全でも、各モータ（関節）の応答・角度は別レイヤー。確認用に2本ある。どちらも `openarm_can`（apt の `python3-openarm-can`）を使うので **システム python（`/usr/bin/python3`）で実行**。enable のみ・指令なし＝トルクは入らず腕は手で動かせる。**teleop が同じバスを使用中は実行しない**（制御が競合）。先に `sudo bash scripts/canup.sh` で固定名 IF を UP しておく。
+
+- **`openarm_motorcheck.py`（一括点検）**: 全4アームを一発で enable→読取→disable し、関節ごとの表＋近零位判定（✓/✗）。teleop 前の健全確認や較正要否のスクリーニングに。
+- **`openarm_motor_status.py <iface>`（ライブ監視）**: 単一アームを連続表示（度数）。`--hz N` で更新頻度、`--once` で1回。較正中・デバッグ中に特定関節を目で追う／応答確認に。
+
+### 較正が要るかの読み方（motorcheck）
+
+near-zero 判定は **「基準零位姿勢」**（各リンクをまっすぐ下げ鉛直に揃えた、較正時に NVRAM 零位として焼いた姿勢）に**保持して読む**のが前提。
+
+- 基準姿勢で全関節 ✓（≈0）なら較正OK。
+- 基準姿勢に保持しているのに ✗（`|角度| > 5.7°`）の関節は、焼いてある零位が真の基準からズレている＝**再較正候補**。
+- **任意の姿勢で読むと無意味**（非ゼロは単に今曲がっているだけ）。これはスクリーニングであって較正そのものではない。零点を決め直すのは calibrate 手順（Enter でその時の姿勢を NVRAM 零位に焼く）。
+
 ## スクリプト一覧
 
 - `setup.sh` … clone 後の一括セットアップ
@@ -79,6 +94,9 @@ sudo bash scripts/burn_channel_id.sh <iface> follower    # 22222222
 - `install_can_rules.sh` … udev 固定名ルール導入（PCごと1回）
 - `burn_channel_id.sh` … アダプタ役割タグの焼き込み/変更
 - `launch_unilateral.sh` / `launch_bimanual.sh` … teleop 起動（内部で canup.sh を呼ぶ。CAN が不健全なら teleop を起動せず停止）
+- `openarm_motor_status.py <iface> [--hz N | --once]` … 単一アームのモータ状態ライブモニタ（関節角を度数表示・enable のみ＝トルク無しの read-only）
+- `openarm_motorcheck.py [--only ROLE|IF,...]` … 全4アームのモータ health＋近零位較正チェック（固定名直接・can_map.env 不要）
+- `scripts/_archive/` … bring-up 期の使い捨て診断（旧 can0-3 / can_map.env 前提・現行運用では非推奨）
 
 ## トラブルシュート
 
