@@ -35,6 +35,8 @@ leader/follower は **アダプタに焼いた channel_id**（役割タグ）＋
 - **udev ルール** … `udev/80-openarm-can.rules` を `install_can_rules.sh` で導入。挿すと自動で固定名（PCごと1回）。
 - **canup.sh** … 実行時に channel_id を読んでリネーム。udev 未導入や hotplug 競合時の確実な保険。teleop 起動ラッパが内部で呼ぶ。
 
+> **udev ルールは各PCの `/etc/udev/rules.d/` に置くシステムファイルで、リポには含まれない。** リポを `git clone` / `git pull` しても各PCの `/etc` は自動更新されない。**新規PCも、既に運用中のPCでルールを更新する場合も、そのPCで1回 `sudo bash scripts/install_can_rules.sh` を実行して反映する**（旧ルールがあれば置換される）。実行後は `cat /etc/udev/rules.d/80-openarm-can.rules` で channel_id 版になったか確認できる。
+
 > 逆転・流動的に崩れる根本原理（カーネル採番揺れ / udev がアダプタを識別できない / USBポートキーの限界）は [docs/can-naming-principle.md](docs/can-naming-principle.md) を参照。
 
 **固定名は teleop 専用ではなく、CAN を使う全タスク共通の土台。** モータ診断・データ収録・グリッパ較正・将来の WBC/policy 実機デプロイなど、どれも同じ4本のバスを開く。**新規スクリプトは生の `can0..3` を決め打ちせず、必ず固定名（`can_lead_r` 等）で参照すること**（生名は USB認識順で揺れる）。`canup.sh`/udev で固定名を付けた後は、どのタスクも名前を書くだけで正しい物理アームに当たる。
