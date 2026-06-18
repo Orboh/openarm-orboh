@@ -30,7 +30,15 @@ esac
 CAM_SERIAL="${CAM_SERIAL:-344422070898}"    # D435i (chest)
 CAMERA_W="${CAMERA_W:-640}"
 CAMERA_H="${CAMERA_H:-480}"
-FPS="${FPS:-30}"
+FPS="${FPS:-30}"                            # = dataset.fps AND teleop loop rate (record forces them equal); camera-capped (~<=60 @640x480 RGB). FPS=60 reduces follower jitter
+
+# ---- Leader gravity compensation (light leader for comfortable collection) ---
+# Inject G(q) feed-forward on the leader (joints 1-7; gripper excluded) so it can
+# be moved by hand. Independent of FPS. Requires Thor's lerobot venv on the
+# feat/gravity-comp branch with pinocchio installed. scale 1.2 validated 2026-06-17.
+GRAVITY_COMP="${GRAVITY_COMP:-true}"
+GRAVITY_SCALE="${GRAVITY_SCALE:-1.2}"
+GRAVITY_URDF="${GRAVITY_URDF:-$HOME/openarm-orboh/urdf/openarm_v10_bimanual.urdf}"
 
 # ---- Dataset tunables --------------------------------------------------------
 NUM_EPISODES="${NUM_EPISODES:-50}"
@@ -42,6 +50,7 @@ DISPLAY_DATA="${DISPLAY_DATA:-true}"        # set false for headless dry-run
 
 echo "[record] side=$SIDE  follower=$FOLLOWER_PORT  leader=$LEADER_PORT"
 echo "[record] camera=chest(D435i $CAM_SERIAL) ${CAMERA_W}x${CAMERA_H}@${FPS}fps  episodes=$NUM_EPISODES"
+echo "[record] gravity_comp=$GRAVITY_COMP scale=$GRAVITY_SCALE side=$SIDE urdf=$GRAVITY_URDF"
 
 lerobot-record \
   --robot.type=openarm_follower \
@@ -52,6 +61,10 @@ lerobot-record \
   --teleop.type=openarm_leader \
   --teleop.port="$LEADER_PORT" \
   --teleop.id="leader_${SIDE}" \
+  --teleop.gravity_compensation="$GRAVITY_COMP" \
+  --teleop.gravity_urdf_path="$GRAVITY_URDF" \
+  --teleop.gravity_side="$SIDE" \
+  --teleop.gravity_scale="$GRAVITY_SCALE" \
   --display_data="$DISPLAY_DATA" \
   --dataset.repo_id="$REPO_ID" \
   --dataset.single_task="$TASK" \
