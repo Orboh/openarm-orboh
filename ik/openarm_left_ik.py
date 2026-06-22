@@ -60,27 +60,45 @@ class OpenArmLeftIK:
             return pin.computeFrameJacobian(self.model, self.data, q, self.ee_fid)
         return pin.computeJointJacobian(self.model, self.data, q, self.ee_jid)
 
+    def _jac_world_pos(self, q):
+        """EE フレームの位置ヤコビアン(3xnv, world-aligned)。位置サーボ用。"""
+        if self.use_frame:
+            J = pin.computeFrameJacobian(self.model, self.data, q, self.ee_fid,
+                                         pin.ReferenceFrame.LOCAL_WORLD_ALIGNED)
+        else:
+            J = pin.computeJointJacobian(self.model, self.data, q, self.ee_jid)
+        return J[:3, :]
+
     def solve(self, target: pin.SE3, q_seed, position_only: bool = True,
-              max_iter: int = 200, eps: float = 1e-4, damp: float = 1e-6, dt: float = 1.0):
-        """target(SE3) へ EE を持っていく q を返す。(q, converged, iters, final_err)。
-        position_only=True なら回転誤差を無視（姿勢自由・到達点のみ）。"""
+              max_iter: int = 300, eps: float = 1e-4, damp: float = 1e-4, dt: float = 1.0):
+        """target(SE3) へ EE を持っていく q を返す。(q, converged, iters, final_err6)。
+        position_only=True は「位置だけ合わせ姿勢は自由」（粗接近向け・到達しやすい・
+        world 位置ヤコビアンで位置サーボ）。False は 6-DOF フルポーズ。"""
         q = np.asarray(q_seed, dtype=float).copy()
-        err = np.zeros(6)
+        p_tgt = np.asarray(target.translation, dtype=float)
+        err6 = np.zeros(6)
         for i in range(max_iter):
-            iMd = self.fk(q).actInv(target)
-            err = pin.log(iMd).vector
+            M = self.fk(q)
             if position_only:
-                err[3:] = 0.0
-            if norm(err) < eps:
-                return q, True, i, err
-            J = -pin.Jlog6(iMd.inverse()) @ self._jac(q)
-            v = -J.T @ solve(J @ J.T + damp * np.eye(6), err)
+                e = M.translation - p_tgt              # world 位置誤差(3,)
+                err6[:3] = e
+                if norm(e) < eps:
+                    return q, True, i, err6
+                Jp = self._jac_world_pos(q)            # 3xnv
+                v = -Jp.T @ solve(Jp @ Jp.T + damp * np.eye(3), e)
+            else:
+                iMd = M.actInv(target)
+                err6 = pin.log(iMd).vector
+                if norm(err6) < eps:
+                    return q, True, i, err6
+                J = -pin.Jlog6(iMd.inverse()) @ self._jac(q)
+                v = -J.T @ solve(J @ J.T + damp * np.eye(6), err6)
             q = pin.integrate(self.model, q, v * dt)
-        return q, False, max_iter, err
+        return q, False, max_iter, err6
 
     def solve_position(self, xyz, q_seed, **kw):
-        """3D 位置(腕ベース系)だけを目標に解く。姿勢は seed の EE 姿勢を初期目標にする。"""
-        target = pin.SE3(self.fk(np.asarray(q_seed, float)).rotation, np.asarray(xyz, float))
+        """3D 位置(腕ベース系)だけを目標に解く（姿勢自由）。"""
+        target = pin.SE3(np.eye(3), np.asarray(xyz, dtype=float))
         return self.solve(target, q_seed, position_only=True, **kw)
 
     def clamp(self, q):
