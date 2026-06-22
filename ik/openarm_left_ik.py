@@ -12,11 +12,16 @@ TCP フレーム（グリッパ先端）をカルテシアン目標へ持って�
 """
 from __future__ import annotations
 
+import os
+
 import numpy as np
 from numpy.linalg import norm, solve
 import pinocchio as pin
 
-DEFAULT_URDF = "/home/orboh/projects/openarm-orboh/urdf/openarm_v10_bimanual.urdf"
+# repo 相対。Vector(~/projects/openarm-orboh) でも Thor(~/openarm-orboh) でも解決する
+DEFAULT_URDF = os.path.normpath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "urdf", "openarm_v10_bimanual.urdf")
+)
 LEFT_ARM_JOINTS = [f"openarm_left_joint{i}" for i in range(1, 8)]  # pinocchio (rad)
 LEROBOT_JOINTS = [f"joint_{i}" for i in range(1, 8)]               # lerobot (deg)
 TCP_FRAME = "openarm_left_hand_tcp"
