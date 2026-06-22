@@ -17,8 +17,8 @@ BIN="$REPO/openarm_teleop/build/unilateral_control"
 [[ "$ARM_SIDE" == right_arm || "$ARM_SIDE" == left_arm ]] || { echo "[ERROR] arm_side は right_arm/left_arm"; exit 1; }
 
 # CAN を channel_id 固定名で UP（USBポート非依存）
-echo "[INFO] CAN bring-up (canup.sh)"
-sudo bash "$REPO/scripts/canup.sh"
+echo "[INFO] CAN bring-up + 健全性チェック (canup.sh)"
+sudo bash "$REPO/scripts/canup.sh" || { echo "[ERROR] CAN bring-up/健全性チェック失敗。teleop を開始しない。"; exit 1; }
 
 set +u; source /opt/ros/jazzy/setup.bash; set -u
 
