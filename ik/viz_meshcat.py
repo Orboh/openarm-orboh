@@ -44,6 +44,22 @@ def left_full_q(full, q_left):
     return q
 
 
+def reach_traj(ik, target, q0, max_rel_deg=3.0, max_steps=400, tol=0.004):
+    """coarse 接近エピソードの軌道（垂下→目標）。各ステップ max_rel 度でクランプし IK を解き直す
+    ＝実機 reach ループと同じ進み方。到達可能なら目標へ、不可能なら関節限界へ走る様子がそのまま軌道になる。"""
+    q = np.asarray(q0, dtype=float).copy()
+    cap = np.deg2rad(max_rel_deg)
+    tgt = np.asarray(target, dtype=float)
+    traj = [q.copy()]
+    for _ in range(max_steps):
+        q_goal, _, _, _ = ik.solve_position(tgt, q)
+        q = q + np.clip(q_goal - q, -cap, cap)
+        traj.append(q.copy())
+        if np.linalg.norm(ik.fk(q).translation - tgt) < tol:
+            break
+    return traj
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--xyz", type=float, nargs=3, default=[0.14, 0.15, 0.31])
@@ -58,34 +74,33 @@ def main():
     print("Meshcat URL:", viz.viewer.url())
 
     ik = OpenArmLeftIK()
-    if args.diverged:
-        q_left = np.deg2rad([-200, 10, 90, 140, 90, -45, 90])
-        tgt, ok = [0.10, 0.15, 0.20], False
-    else:
-        q_left, ok, _, _ = ik.solve_position(args.xyz, np.zeros(7))
-        tgt = args.xyz
-    print(f"target={tgt}  converged={ok}")
+    q0 = np.zeros(7)
+    target = [0.10, 0.15, 0.20] if args.diverged else list(args.xyz)
+    traj_left = reach_traj(ik, target, q0)
+    end_err = float(np.linalg.norm(ik.fk(traj_left[-1]).translation - np.array(target)))
+    ok = end_err < 0.02
+    print(f"target={target}  steps={len(traj_left)}  end_err={end_err * 1000:.0f}mm  reached={ok}")
 
-    # 目標点を赤い球で表示
+    # 目標点を球で表示（到達=緑 / 未到達=赤）
     import meshcat.geometry as mg
     import meshcat.transformations as mtf
-    color = 0xff3333 if (np.linalg.norm(np.array(tgt) - ik.fk(np.zeros(7)).translation) > 0.6) else 0x33aa33
-    viz.viewer["target"].set_object(mg.Sphere(0.02), mg.MeshLambertMaterial(color=color))
-    viz.viewer["target"].set_transform(mtf.translation_matrix(tgt))
+    viz.viewer["target"].set_object(mg.Sphere(0.02),
+                                    mg.MeshLambertMaterial(color=(0x33aa33 if ok else 0xff3333)))
+    viz.viewer["target"].set_transform(mtf.translation_matrix(target))
 
+    traj_full = [left_full_q(full, q) for q in traj_left]
     if args.check:
-        viz.display(left_full_q(full, q_left))
-        print("check OK: model+meshes loaded, posed.")
+        viz.display(traj_full[-1])
+        print("check OK: model+meshes loaded, episode computed & posed.")
         return
 
-    # 垂下 -> 解 へアニメーション
-    for a in np.linspace(0.0, 1.0, 40):
-        viz.display(left_full_q(full, a * q_left))
-        time.sleep(0.03)
-    print("posed. ブラウザで上記 URL を開く。Ctrl-C で終了（ビューアは生存）。")
+    print(f"episode を再生（ループ・{len(traj_full)}フレーム・はじめ→終わり）。ブラウザで上記 URL を開く。Ctrl-C で終了。")
     try:
         while True:
-            time.sleep(1)
+            viz.display(traj_full[0])
+            time.sleep(0.5)
+            viz.play(traj_full, 0.04)
+            time.sleep(0.8)
     except KeyboardInterrupt:
         pass
 
