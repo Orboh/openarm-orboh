@@ -14,8 +14,8 @@ if pgrep -af "unilateral_control|bilateral_control" | grep -v $$ ; then
   echo "[!] teleop が既に動作中。先に停止してから再実行。"; exit 1
 fi
 
-echo "=== CAN bring-up (canup.sh) ==="
-sudo bash "$REPO/scripts/canup.sh"
+echo "=== CAN bring-up + 健全性チェック (canup.sh) ==="
+sudo bash "$REPO/scripts/canup.sh" || { echo "[ERROR] CAN bring-up/健全性チェック失敗。teleop を開始しない。"; exit 1; }
 
 set +u; source /opt/ros/jazzy/setup.bash; set -u
 

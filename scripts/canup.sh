@@ -57,7 +57,10 @@ for tmp in "${!TMP2TARGET[@]}"; do
 done
 
 # 4) CAN-FD 設定 + UP（実証済み 1M/5M）。openarm-can-cli が無ければ ip link で代替。
-up=0
+#    注意: ここでの "UP" は admin link state。CAN が通信できるか（BUS-OFF/ERROR-PASSIVE で
+#    ないか）は別物。だから設定後に §5 で can_check.sh が実 CAN state を確認する。
+cfg=0
+declare -a TARGETS=()
 for cur in "${!CUR2TARGET[@]}"; do
   tgt="${CUR2TARGET[$cur]}"
   if command -v openarm-can-cli >/dev/null 2>&1; then
@@ -68,13 +71,26 @@ for cur in "${!CUR2TARGET[@]}"; do
       dbitrate 5000000 dsample-point 0.75 dsjw 2 fd on restart-ms 100
     ip link set "$tgt" up
   fi
-  up=$((up+1))
+  cfg=$((cfg+1)); TARGETS+=("$tgt")
   cid=$(cat "/sys/class/net/$tgt/peak_usb/can_channel_id" 2>/dev/null || echo "?")
   port=$(basename "$(readlink -f "/sys/class/net/$tgt/device" 2>/dev/null)" 2>/dev/null || echo "?")
-  echo "[up] $tgt  channel_id=$cid  port=$port"
+  echo "[cfg] $tgt  channel_id=$cid  port=$port"
 done
 
 echo
-echo "up=$up  （channel_id が同じなら、port が変わっても固定名は不変＝ポート非依存）"
-ip -br link show type can
-[[ $up -ge 4 ]] || echo "[!] 4ch 揃っていない。PEAK 2台を直挿し（ハブNG）か、channel_id 焼き込みを確認"
+echo "設定済み=${cfg}ch（channel_id が同じなら port が変わっても固定名は不変＝ポート非依存）"
+[[ $cfg -ge 4 ]] || echo "[!] 4ch 揃っていない。PEAK 2台を直挿し（ハブNG）か、channel_id 焼き込みを確認"
+
+# 5) 実 CAN state を確認（admin UP ≠ 通信可。BUS-OFF/ERROR-PASSIVE をここで暴く）。
+#    設定した IF だけを対象にし、健全でなければ非0で終わる → 呼び出し元（launch_*）が teleop を止める。
+echo
+CHK="$(dirname "$0")/can_check.sh"
+if [[ -f "$CHK" ]]; then
+  if ! bash "$CHK" "${TARGETS[@]}"; then
+    echo "[!] CAN state 異常。teleop 前に配線/コネクタ嵌合・PEAK 再挿し・canup.sh 再実行を確認"
+    exit 1
+  fi
+else
+  echo "[warn] can_check.sh が無い。admin state のみ表示（通信可否は別途確認）:"
+  ip -br link show type can
+fi
