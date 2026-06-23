@@ -85,3 +85,15 @@ can_fol_r  ch=44444444 port=3-7   ← 本来 leader のアダプタが can_fol_ 
 - **再起動 + leader/follower のポート完全スワップ**（lead: `1-4.2`→`1-4.1` / fol: `1-4.1`→`1-4.2`）後に `canup.sh` を再実行 → 固定名が channel_id に追従して同じ役割に付与。temp名2パスがスワップ状態でも正常動作。
 
 → **x86_64（このPC）に続き aarch64（Jetson Thor）でも、USBポート・再起動・PC・アーキに依存せず channel_id 方式の命名が成立**。`setup.sh`（teleop ビルド）は未実施（Thor にアーム未接続のため命名検証まで。ROS jazzy + OpenArm PPA の arm64 対応は別途確認）。
+
+## 検証3（udev 自動命名経路・別PC Thor, 2026-06-15）
+
+検証/検証2 は `canup.sh`（実行時リネーム）経路だった。ここでは各PCに `install_can_rules.sh` で channel_id 版 udev ルールを導入（Vector・Thor とも導入済み）した上で、**udev による自動命名（canup.sh 非依存）経路**を Thor で実機検証。
+
+手順: PEAK 2台のUSBポートを物理入替して replug し、`canup.sh` を叩かずに `ip -br link show type can` を確認。
+
+- 入替前: `can_lead_r/l`(ch 44444444)=port `1-2.4` / `can_fol_r/l`(ch 22222222)=port `1-2.3`
+- 入替後: `can_lead_r/l`(ch 44444444)=port **`1-2.3`** / `can_fol_r/l`(ch 22222222)=port **`1-2.4`** ← ポートが入れ替わったが、
+- 4本とも `canup.sh` 非依存で自動命名（全て DOWN＝udev による新規命名。hotplug 競合は本試行では発生せず）。
+
+→ **ポートを入れ替えても udev が channel_id を見て leader/follower を正しく自動命名＝自動命名経路でもポート非依存を実機確認。** 取りこぼし（hotplug 競合）時は `canup.sh` が保険（teleop 起動ラッパが内部で呼ぶ）。これで「canup.sh 実行時経路」＋「udev 自動命名経路」の両方が、x86_64（Vector）/ aarch64（Thor）で実機合格。
