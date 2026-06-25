@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """chest D435i の color を MJPEG で LAN 配信する Thor 用ビューア.
 
-用途: オクラ収集のシーン設定（トレイ/かご配置の画角確認）と held-out グリッドの
-マス決め。ブラウザで http://<ThorのIP>:8080 を開くと chest 映像が見える。
-（VLA フェーズ1 収集マニュアル §1 シーン設定・§2 グリッド/held-out 決め）
+用途: オクラ収集のシーン設定（トレイ/かご配置の画角確認）と、セル割りの範囲の下見。
+ブラウザで http://<ThorのIP>:8080 を開くと chest 映像が見える。
+注意: 実際のセルは物理トレイ面で定義する。chest は斜め俯瞰なので画像の一様グリッドは
+テーブル平面では一様にならない（透視）＝`--grid` オーバーレイをセル定義に使わない。
+（VLA フェーズ1 収集マニュアル §1 シーン設定・§2.1 グリッド＝物理トレイ面で定義）
 
 env: Thor の system python3（pyrealsense2 + cv2 4.8.0 あり）。venv 不要。
 camera: chest = Intel RealSense D435I serial 344422070898（手首 D405=260322272302 と取り違えないよう serial 指定）。
@@ -14,7 +16,7 @@ camera: chest = Intel RealSense D435I serial 344422070898（手首 D405=26032227
 
 使い方（Thor 上・リポジトリ取得後）:
     python3 ~/openarm-orboh/scripts/stream_chest.py                 # 素の chest 映像を :8080 で配信
-    python3 ~/openarm-orboh/scripts/stream_chest.py --grid 4x3      # 4列×3行のグリッド線+C1..C12 ラベル重畳（held-out 決め用）
+    python3 ~/openarm-orboh/scripts/stream_chest.py --grid 4x3      # セル線+C1..C12 重畳（範囲の下見用・物理セルとは一致しない・§2.1）
     python3 ~/openarm-orboh/scripts/stream_chest.py --port 8080 --width 640 --height 480 --fps 30
 閲覧: 同一LANの PC ブラウザで  http://192.168.0.128:8080
 停止: Ctrl+C もしくは  pkill -f stream_chest.py
