@@ -52,7 +52,8 @@ CAMERAS="$CAMERAS }"
 # feat/gravity-comp branch with pinocchio installed. scale 1.2 validated 2026-06-17.
 GRAVITY_COMP="${GRAVITY_COMP:-true}"
 GRAVITY_SCALE="${GRAVITY_SCALE:-1.2}"
-GRAVITY_URDF="${GRAVITY_URDF:-$HOME/openarm-orboh/urdf/openarm_v10_bimanual.urdf}"
+_RPP_REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+GRAVITY_URDF="${GRAVITY_URDF:-$_RPP_REPO_ROOT/urdf/openarm_v10_bimanual.urdf}"
 
 # ---- Dataset tunables --------------------------------------------------------
 NUM_EPISODES="${NUM_EPISODES:-50}"
