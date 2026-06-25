@@ -104,8 +104,11 @@ def capture_loop(serial, width, height, fps, grid, quality):
 
 
 INDEX = (b"<!doctype html><meta charset=utf-8><title>chest stream</title>"
-         b"<body style='margin:0;background:#111'>"
-         b"<img src='/stream' style='width:100%;height:auto'>")
+         b"<meta name=viewport content='width=device-width,initial-scale=1'>"
+         b"<body style='margin:0;height:100vh;background:#111;display:flex;"
+         b"align-items:center;justify-content:center;overflow:hidden'>"
+         b"<img src='/stream' style='max-width:100%;max-height:100%;"
+         b"object-fit:contain;display:block'>")
 
 
 class Handler(BaseHTTPRequestHandler):
