@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
 """chest D435i の color を MJPEG で LAN 配信する Thor 用ビューア.
 
-用途: オクラ収集のシーン設定（トレイ/かご配置の画角確認）と、セル割りの範囲の下見。
-ブラウザで http://<ThorのIP>:8080 を開くと chest 映像が見える。
-注意: 実際のセルは物理トレイ面で定義する。chest は斜め俯瞰なので画像の一様グリッドは
-テーブル平面では一様にならない（透視）＝`--grid` オーバーレイをセル定義に使わない。
-（VLA フェーズ1 収集マニュアル §1 シーン設定・§2.1 グリッド＝物理トレイ面で定義）
+用途: オクラ収集のシーン設定（白画用紙の背景・マット・かごの画角確認、マットがフレームを
+十分に埋めているかの下見）。ブラウザで http://<ThorのIP>:8080 を開くと chest 映像が見える。
+（VLA フェーズ1 収集マニュアル §1 シーン設定）
 
 env: Thor の system python3（pyrealsense2 + cv2 4.8.0 あり）。venv 不要。
 camera: chest = Intel RealSense D435I serial 344422070898（手首 D405=260322272302 と取り違えないよう serial 指定）。
 管理: openarm-orboh リポジトリ管理（PR 経由）。Thor は `git pull` で取得し `scripts/stream_chest.py` を使う。
 
-⚠ カメラ排他: D435i は 1プロセス占有。**record や teleop の前に必ず停止する**
-   （`pkill -f stream_chest.py`）。起動したままだと収集側がカメラを開けず占有エラー。
+注意:
+- **セル線オーバーレイは持たない（素の映像のみ）**。セルは物理の棘で定義し（マニュアル §2.1）、斜めカメラでは
+  画像の一様グリッドが平面と一致しないため、画面にセル線は描かない（誤解防止）。なお本ビューアの描画は
+  ライブ映像のみで録画データには入らない（record は別プロセス・カメラ排他で同時起動不可）。
+- **カメラ排他**: D435i は 1プロセス占有。record/teleop の前に必ず停止する（`pkill -f stream_chest.py`）。
 
 使い方（Thor 上・リポジトリ取得後）:
-    python3 ~/openarm-orboh/scripts/stream_chest.py                 # 素の chest 映像を :8080 で配信
-    python3 ~/openarm-orboh/scripts/stream_chest.py --grid 4x3      # セル線+C1..C12 重畳（範囲の下見用・物理セルとは一致しない・§2.1）
+    python3 ~/openarm-orboh/scripts/stream_chest.py
     python3 ~/openarm-orboh/scripts/stream_chest.py --port 8080 --width 640 --height 480 --fps 30
 閲覧: 同一LANの PC ブラウザで  http://192.168.0.128:8080
 停止: Ctrl+C もしくは  pkill -f stream_chest.py
@@ -39,46 +39,7 @@ _lock = threading.Lock()
 _stop = threading.Event()
 
 
-def parse_grid(spec: str | None):
-    """'4x3' -> (cols=4, rows=3)。None なら重畳なし。"""
-    if not spec:
-        return None
-    try:
-        cols, rows = (int(x) for x in spec.lower().split("x"))
-        if cols < 1 or rows < 1:
-            raise ValueError
-        return cols, rows
-    except Exception:
-        raise SystemExit(f"--grid は 'COLSxROWS' 形式（例 4x3）: {spec!r}")
-
-
-def draw_grid(img, grid):
-    """セル線と C1..CN（左→右・上→下＝行優先）のラベルを重畳。マニュアル §2 の C1.. と対応。"""
-    cols, rows = grid
-    h, w = img.shape[:2]
-    color = (0, 255, 0)
-    for c in range(1, cols):
-        x = round(w * c / cols)
-        cv2.line(img, (x, 0), (x, h), color, 1)
-    for r in range(1, rows):
-        y = round(h * r / rows)
-        cv2.line(img, (0, y), (w, y), color, 1)
-    n = 0
-    for r in range(rows):
-        for c in range(cols):
-            n += 1
-            cx = round(w * (c + 0.5) / cols)
-            cy = round(h * (r + 0.5) / rows)
-            label = f"C{n}"
-            (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
-            cv2.putText(img, label, (cx - tw // 2, cy + th // 2),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 3, cv2.LINE_AA)
-            cv2.putText(img, label, (cx - tw // 2, cy + th // 2),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
-    return img
-
-
-def capture_loop(serial, width, height, fps, grid, quality):
+def capture_loop(serial, width, height, fps, quality):
     global _latest_jpeg
     pipeline = rs.pipeline()
     cfg = rs.config()
@@ -94,8 +55,6 @@ def capture_loop(serial, width, height, fps, grid, quality):
             if not color:
                 continue
             img = np.asanyarray(color.get_data())
-            if grid:
-                img = draw_grid(img, grid)
             ok, buf = cv2.imencode(".jpg", img, enc)
             if ok:
                 with _lock:
@@ -155,27 +114,25 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="chest D435i を MJPEG 配信（Thor）")
+    ap = argparse.ArgumentParser(description="chest D435i を MJPEG 配信（Thor・素の映像）")
     ap.add_argument("--serial", default=CHEST_SERIAL, help="RealSense serial（既定=chest D435i）")
     ap.add_argument("--width", type=int, default=640)
     ap.add_argument("--height", type=int, default=480)
     ap.add_argument("--fps", type=int, default=30)
     ap.add_argument("--port", type=int, default=8080)
-    ap.add_argument("--grid", default=None, help="'COLSxROWS'（例 4x3）でグリッド線+C1..ラベル重畳")
     ap.add_argument("--quality", type=int, default=80, help="JPEG 品質 1-100")
     args = ap.parse_args()
 
-    grid = parse_grid(args.grid)
     t = threading.Thread(
         target=capture_loop,
-        args=(args.serial, args.width, args.height, args.fps, grid, args.quality),
+        args=(args.serial, args.width, args.height, args.fps, args.quality),
         daemon=True,
     )
     t.start()
 
     server = ThreadingHTTPServer(("0.0.0.0", args.port), Handler)
     print(f"[http] 配信開始: http://<ThorのIP>:{args.port}  (例 http://192.168.0.128:{args.port})")
-    print(f"[http] grid={'なし' if not grid else args.grid}  停止=Ctrl+C / pkill -f stream_chest.py")
+    print("[http] 停止=Ctrl+C / pkill -f stream_chest.py")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
