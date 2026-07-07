@@ -71,6 +71,11 @@ for cur in "${!CUR2TARGET[@]}"; do
       dbitrate 5000000 dsample-point 0.75 dsjw 2 fd on restart-ms 100
     ip link set "$tgt" up
   fi
+  # 送信キュー拡張: 既定 txqueuelen=10 は小さく、lerobot teleop の 200Hz sync_read
+  # （8モータ）のバーストで送信キューが即溢れ ENOBUFS "No buffer space available"
+  # [Errno 105] で teleop がクラッシュする（2026-07-07 Thor 左腕で14分走行後に発生）。
+  # キューを増やすだけで副作用なし。openarm-can-cli 経路でも同様に効かせる。
+  ip link set "$tgt" txqueuelen 1000 2>/dev/null || true
   cfg=$((cfg+1)); TARGETS+=("$tgt")
   cid=$(cat "/sys/class/net/$tgt/peak_usb/can_channel_id" 2>/dev/null || echo "?")
   port=$(basename "$(readlink -f "/sys/class/net/$tgt/device" 2>/dev/null)" 2>/dev/null || echo "?")
