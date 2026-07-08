@@ -80,5 +80,6 @@ echo "[web2cam] ブラウザで開く:  chest=http://$IP:$CHEST_PORT   wrist=htt
 if [[ -n "${ALL_IPS// /}" ]]; then
   echo "[web2cam] IP 候補: $ALL_IPS"
 fi
+echo "[web2cam] 起動時整列: 左leader→右leader→左follower→右follower の順に初期姿勢（肘36°）へ各約2.2秒かけて自動で動く。両腕まわりの空間を確保して待つ。"
 echo "[web2cam] teleop 開始（両腕・カメラ無し・重力補償 L=$LSCALE R=$RSCALE・fps200）。両腕を真下に垂らして開始。Ctrl-C で teleop も配信も全部停止。"
 bash "$REPO/scripts/run_teleop_bimanual.sh" "$LSCALE" "$RSCALE"

@@ -77,5 +77,6 @@ echo "[web2cam] ブラウザで開く:  chest=http://$IP:$CHEST_PORT   wrist=htt
 if [[ -n "${ALL_IPS// /}" ]]; then
   echo "[web2cam] IP 候補: $ALL_IPS"
 fi
+echo "[web2cam] 起動時整列: leader→follower の順に初期姿勢（肘36°）へ各約2.2秒かけて自動で動く。腕まわりの空間を確保して待つ。"
 echo "[web2cam] teleop 開始（左腕・カメラ無し・重力補償 scale=$SCALE・fps200）。Ctrl-C で teleop も配信も全部停止。"
 bash "$REPO/scripts/run_teleop_left.sh" "$SCALE"
