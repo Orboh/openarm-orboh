@@ -15,7 +15,10 @@
 #
 # Prereqs:
 #   1. CAN up as fixed names (udev auto on plug/reboot, or: sudo bash scripts/canup.sh)
-#   2. lerobot-calibrate follower & leader once with ids: follower_left / leader_left
+#   2. 恒久ゼロ較正: bash scripts/calibrate_openarm.sh <left|right>
+#      (follower/leader 両方の homing offset を保存。以後 connect() は毎セッションの
+#      零位焼きをスキップし、開始基準がセッション・電源断をまたいで固定される。
+#      モータ側零位を外部ツールで焼き直したら再較正すること)
 #
 # Usage:
 #   bash scripts/record_pick_place_openarm.sh                                     # chest-only (monocular baseline)
@@ -67,6 +70,14 @@ fi
 TASK="${TASK:-Pick up the okra and place it in the bin}"
 DISPLAY_DATA="${DISPLAY_DATA:-true}"        # set false for headless dry-run
 
+# ---- Start pose alignment (captured "ready" pose, optional) ------------------
+# キャプチャ済み(scripts/capture_initial_pose.sh $SIDE)なら follower/leader の
+# 整列先に使う。未キャプチャなら公式既定(肘36°)にフォールバック。
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
+POSE="$REPO/config/initial_pose_${SIDE}.yaml"
+POSE_ARGS=()
+[ -f "$POSE" ] && POSE_ARGS+=(--robot.initial_pose_path="$POSE" --teleop.initial_pose_path="$POSE")
+
 echo "[record] side=$SIDE  follower=$FOLLOWER_PORT  leader=$LEADER_PORT"
 echo "[record] cameras=$CAMERAS"
 echo "[record] wrist=$WRIST  repo_id=$REPO_ID  episodes=$NUM_EPISODES  ${CAMERA_W}x${CAMERA_H}@${FPS}fps"
@@ -92,4 +103,5 @@ lerobot-record \
   --dataset.num_episodes="$NUM_EPISODES" \
   --dataset.episode_time_s="$EPISODE_TIME_S" \
   --dataset.reset_time_s="$RESET_TIME_S" \
-  --dataset.push_to_hub=false
+  --dataset.push_to_hub=false \
+  "${POSE_ARGS[@]}"

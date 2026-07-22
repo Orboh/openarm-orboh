@@ -10,6 +10,13 @@ RSCALE="${2:-$LSCALE}"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 URDF="$REPO/urdf/openarm_v10_bimanual.urdf"
 BIN="$HOME/projects/lerobot/.venv/bin/lerobot-teleoperate"
+# 開始姿勢: 左右それぞれキャプチャ済み(scripts/capture_initial_pose.sh left|right)なら
+# 各腕の整列先に使う。未キャプチャの腕は公式既定(肘36°)にフォールバック。
+LPOSE="$REPO/config/initial_pose_left.yaml"
+RPOSE="$REPO/config/initial_pose_right.yaml"
+POSE_ARGS=()
+[ -f "$LPOSE" ] && POSE_ARGS+=(--robot.left_arm_config.initial_pose_path="$LPOSE" --teleop.left_arm_config.initial_pose_path="$LPOSE")
+[ -f "$RPOSE" ] && POSE_ARGS+=(--robot.right_arm_config.initial_pose_path="$RPOSE" --teleop.right_arm_config.initial_pose_path="$RPOSE")
 "$BIN" \
   --robot.type=bi_openarm_follower \
   --robot.left_arm_config.port=can_fol_l --robot.left_arm_config.side=left \
@@ -29,4 +36,5 @@ BIN="$HOME/projects/lerobot/.venv/bin/lerobot-teleoperate"
   --teleop.right_arm_config.gravity_side=right \
   --teleop.right_arm_config.gravity_scale="$RSCALE" \
   --teleop.right_arm_config.use_velocity_and_torque=true \
-  --fps=200
+  --fps=200 \
+  "${POSE_ARGS[@]}"
