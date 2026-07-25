@@ -80,8 +80,10 @@ DISPLAY_DATA="${DISPLAY_DATA:-true}"        # set false for headless dry-run
 #     グリッパは常に閉鎖ゼロへピン留め。
 #   - エピソード間: lerobot-record のリセットは reset_time_s の手動ウィンドウ
 #     (teleop 運転)。leader を手でこの ready 姿勢に戻してから次エピソードを
-#     開始すること(自動復帰は record 側には無い。推論側 run_rollout.sh は
-#     reset_to_initial_position で自動復帰する)。
+#     開始する。戻し忘れを防ぐため下の開始姿勢ゲートが判定し、許容外なら
+#     録り始めない(推論側 run_rollout.sh は reset_to_initial_position で
+#     完全自動復帰。record は teleop 運転中で人の手が leader に載るため、
+#     無断で腕を動かさずゲート+キー押しアラインにしてある)。
 #   - 収集セッションを跨ぐ場合も同じ ready YAML を使い続ける(較正=恒久ゼロ +
 #     同一 YAML で、セッション間の座標系ずれ・開始姿勢ずれの両方を防ぐ)。
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
@@ -89,10 +91,39 @@ POSE="$REPO/config/initial_pose_${SIDE}.yaml"
 POSE_ARGS=()
 [ -f "$POSE" ] && POSE_ARGS+=(--robot.initial_pose_path="$POSE" --teleop.initial_pose_path="$POSE")
 
+# ---- Per-episode start-pose gate (収集データ品質) ----------------------------
+# 接続直後の姿勢(= align 済みの ready 姿勢)を基準に、次エピソードを始める前に
+# 全関節の逸脱を判定する。許容外なら録り始めず、ターミナルに逸脱関節を表示:
+#   a キー   -> leader を ready 姿勢へ自動で戻す(follower は teleop で追従)
+#   右矢印   -> そのまま録る(逸脱量はログに残る)
+#   esc      -> 収集を止める
+# 既定 8° の根拠: 2026-07-20 収集の実測ばらつきは J4 で range 27.3°/std 9.7°、
+# J1/J6/J7 も可動域の 2 割前後。8° なら大外れは弾き、手で戻せる範囲には収まる。
+# START_POSE_TOL_DEG="" で無効化(従来の手動リセットのみ)。
+# ":-" ではなく "-" を使う: 前者は明示的な空文字も既定値で上書きしてしまい、
+# 無効化できなくなる。
+START_POSE_TOL_DEG="${START_POSE_TOL_DEG-8}"
+START_POSE_MAX_WAIT_S="${START_POSE_MAX_WAIT_S:-120}"
+START_POSE_LOG="${START_POSE_LOG:-$REPO/data-collection-logs/start-pose-$(date +%Y%m%d-%H%M%S)-${SIDE}.jsonl}"
+GATE_ARGS=()
+if [ -n "$START_POSE_TOL_DEG" ]; then
+  GATE_ARGS+=(
+    --start_pose_tolerance_deg="$START_POSE_TOL_DEG"
+    --start_pose_max_wait_s="$START_POSE_MAX_WAIT_S"
+    --start_pose_log_path="$START_POSE_LOG"
+  )
+fi
+
 echo "[record] side=$SIDE  follower=$FOLLOWER_PORT  leader=$LEADER_PORT"
 echo "[record] cameras=$CAMERAS"
 echo "[record] wrist=$WRIST  repo_id=$REPO_ID  episodes=$NUM_EPISODES  ${CAMERA_W}x${CAMERA_H}@${FPS}fps"
 echo "[record] gravity_comp=$GRAVITY_COMP scale=$GRAVITY_SCALE side=$SIDE urdf=$GRAVITY_URDF"
+if [ -n "$START_POSE_TOL_DEG" ]; then
+  echo "[record] start-pose gate: tolerance=${START_POSE_TOL_DEG}deg  max_wait=${START_POSE_MAX_WAIT_S}s  log=$START_POSE_LOG"
+  echo "[record]   keys while the gate waits: a = align leader to ready pose, right arrow = record anyway, esc = stop"
+else
+  echo "[record] start-pose gate: disabled (manual reset only)"
+fi
 
 lerobot-record \
   --robot.type=openarm_follower \
@@ -115,4 +146,5 @@ lerobot-record \
   --dataset.episode_time_s="$EPISODE_TIME_S" \
   --dataset.reset_time_s="$RESET_TIME_S" \
   --dataset.push_to_hub=false \
-  "${POSE_ARGS[@]}"
+  "${POSE_ARGS[@]}" \
+  "${GATE_ARGS[@]}"
