@@ -19,6 +19,10 @@
 - 接触判定: |vel| < 速度しきい値 かつ |torque| > トルクしきい値 かつ トルク符号が押し込み方向、
   を2サンプル連続。
 - グリッパは決してバンプしない。offset は 0 に固定。前提として flash zero を完全閉鎖で焼いておく。
+- **導出の正本(なぜこの式で機械基準になるか・誤差伝播・stop 角の測定式・限界)** →
+  `~/Documents/Humanoid-Research/04-Hardware/OpenArm/OpenArm-Zero-Calibration-and-Start-Pose.md`
+  の「bump-to-stop の零位はなぜ機械基準になるか(導出と stop 角の測定手順)」。
+  本ファイルは手順のみを持ち、理論は二重化しない。
 
 ---
 
@@ -92,8 +96,15 @@ lerobot-calibrate --robot.type=openarm_follower --robot.port=can_fol_r \
    (簡易には `capture_initial_pose.py --no-gravity` のライブ表示が使える)
 3. 全関節 |論理角| <= 0.05 rad(~2.9 deg)であること
 4. 特定関節だけ系統的にズレる場合、その関節の実ストッパ角が公称からズレている。
-   ズレ量を公称に加えた値を `--robot.bump_stop_angles_deg='{joint_1: -78.5}'` の形で
-   上書きし再較正 → 再検証。確定した個体値は本ファイルに記録:
+   **測定式** (導出は下記ポインタ):
+
+       stop_真 = stop_仮定 − (自由懸垂で読んだ論理角)
+
+   仮定した stop 角の誤差は、自由懸垂での論理読みに 1:1 でそのまま現れる。
+   つまり 4-2/4-3 で読んだ値をそのまま公称から引けば実ストッパ角が出る
+   (符号注意: 読みが +2.0 deg なら公称 −80 → 実 −82.0)。外部の角度計は不要。
+   得た値を `--robot.bump_stop_angles_deg='{joint_1: -82.0}'` の形で上書きし
+   再較正 → 再検証。収束するまで反復。確定した個体値は本ファイルに記録:
 
 per-unit 確定値の記録欄(較正のたび更新):
 - follower_right: (未計測)
@@ -106,8 +117,15 @@ per-unit 確定値の記録欄(較正のたび更新):
 ## 5. ±0.05 rad 基準検証(較正の合否判定)
 
 - 方法: 上記 4-2/4-3。真下垂れで全関節 |論理角| <= 0.05 rad なら合格
+- **±0.05 rad (~2.9 deg) は公式 docs の受入基準**(Orboh が決めた値ではない):
+  https://docs.openarm.dev/tutorial/setup/ 「all joint positions should read within
+  ±0.05 rad of zero when the arm is in its reference pose」。
+  公式の bump スクリプト側には合否判定が無い(`ideal` との差分計算までで終わる)。
 - 加えて既知姿勢での交差確認: 肘だけ 90° に曲げて J4 が ~90 deg を指すこと
 - leader / follower 両方で実施(それぞれ独立に較正されるため)
+- **最終的な合否は絶対精度ではなく再現性と左右一致で見る**: §6 の電源断を挟んだ
+  offset 一致と、§7 の leader/follower 開始一致が実質的な判定。理由は導出ノートの
+  「構造上の帰結」節(人の判断が毎回から1度へ移るので、絶対誤差は 1 回分に律速される)。
 
 ---
 
