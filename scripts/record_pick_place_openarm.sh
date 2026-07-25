@@ -91,21 +91,42 @@ POSE="$REPO/config/initial_pose_${SIDE}.yaml"
 POSE_ARGS=()
 [ -f "$POSE" ] && POSE_ARGS+=(--robot.initial_pose_path="$POSE" --teleop.initial_pose_path="$POSE")
 
-# ---- Per-episode start-pose gate (収集データ品質) ----------------------------
-# 接続直後の姿勢(= align 済みの ready 姿勢)を基準に、次エピソードを始める前に
-# 全関節の逸脱を判定する。許容外なら録り始めず、ターミナルに逸脱関節を表示:
-#   a キー   -> leader を ready 姿勢へ自動で戻す(follower は teleop で追従)
-#   右矢印   -> そのまま録る(逸脱量はログに残る)
-#   esc      -> 収集を止める
-# 既定 8° の根拠: 2026-07-20 収集の実測ばらつきは J4 で range 27.3°/std 9.7°、
-# J1/J6/J7 も可動域の 2 割前後。8° なら大外れは弾き、手で戻せる範囲には収まる。
-# START_POSE_TOL_DEG="" で無効化(従来の手動リセットのみ)。
+# ---- エピソードの進め方 / 開始姿勢の扱い -------------------------------------
+# EPISODE_ADVANCE=manual (既定): エピソードの区切りを人が握る。
+#   1 エピソード収録が終わる
+#   2 人が a キー -> 両腕が開始姿勢へ戻る(先に腕を退避させる = 戻り経路で
+#     置いたばかりの物を薙がない。戻りは関節空間の直線補間で衝突判定は無い)
+#   3 人が環境を整える
+#   4 人が右矢印 -> 次のエピソード開始
+#   左矢印 = 直前のテイクを破棄して録り直す(破棄後もう一度 2 から)
+#   esc    = 収集終了
+#   待ちは無制限。テレオペ収集は必ず人が居るので、勝手に進めない方が安全。
+#
+# EPISODE_ADVANCE=auto: 従来の時間駆動。reset_time_s の窓が過ぎたら次へ自動で
+#   進む。開始姿勢は「許容内か判定して待つ」ゲートになる(人が手で戻す前提)。
+#   エピソードだけを速く回したい時用。
+EPISODE_ADVANCE="${EPISODE_ADVANCE:-manual}"
+case "$EPISODE_ADVANCE" in
+  manual|auto) ;;
+  *) echo "[record] EPISODE_ADVANCE must be 'manual' or 'auto', got '$EPISODE_ADVANCE'" >&2; exit 1 ;;
+esac
+
+# 許容角の意味はモードで変わる。
+#   manual: 戻した"後"の検算しきい値。ソフトが戻すのでサーボ整定誤差しか残らず、
+#           3° あれば「戻し損ね」(CANドロップ/障害物で停止/沈み込み)だけを拾える。
+#   auto  : 人が手で戻したのを裁く門のしきい値。2026-07-20 の実測ばらつきは J4 で
+#           range 27.3°/std 9.7°、J1/J6/J7 も可動域の 2 割前後だったので 8°。
+# START_POSE_TOL_DEG="" で開始姿勢の扱いを完全に無効化。
 # ":-" ではなく "-" を使う: 前者は明示的な空文字も既定値で上書きしてしまい、
 # 無効化できなくなる。
-START_POSE_TOL_DEG="${START_POSE_TOL_DEG-8}"
-START_POSE_MAX_WAIT_S="${START_POSE_MAX_WAIT_S:-120}"
+if [ "$EPISODE_ADVANCE" = "manual" ]; then
+  START_POSE_TOL_DEG="${START_POSE_TOL_DEG-3}"
+else
+  START_POSE_TOL_DEG="${START_POSE_TOL_DEG-8}"
+fi
+START_POSE_MAX_WAIT_S="${START_POSE_MAX_WAIT_S:-120}"   # auto モードのゲート待ち上限のみに効く
 START_POSE_LOG="${START_POSE_LOG:-$REPO/data-collection-logs/start-pose-$(date +%Y%m%d-%H%M%S)-${SIDE}.jsonl}"
-GATE_ARGS=()
+GATE_ARGS=(--episode_advance="$EPISODE_ADVANCE")
 if [ -n "$START_POSE_TOL_DEG" ]; then
   GATE_ARGS+=(
     --start_pose_tolerance_deg="$START_POSE_TOL_DEG"
@@ -118,11 +139,24 @@ echo "[record] side=$SIDE  follower=$FOLLOWER_PORT  leader=$LEADER_PORT"
 echo "[record] cameras=$CAMERAS"
 echo "[record] wrist=$WRIST  repo_id=$REPO_ID  episodes=$NUM_EPISODES  ${CAMERA_W}x${CAMERA_H}@${FPS}fps"
 echo "[record] gravity_comp=$GRAVITY_COMP scale=$GRAVITY_SCALE side=$SIDE urdf=$GRAVITY_URDF"
-if [ -n "$START_POSE_TOL_DEG" ]; then
-  echo "[record] start-pose gate: tolerance=${START_POSE_TOL_DEG}deg  max_wait=${START_POSE_MAX_WAIT_S}s  log=$START_POSE_LOG"
-  echo "[record]   keys while the gate waits: a = align leader to ready pose, right arrow = record anyway, esc = stop"
+echo "[record] episode_advance=$EPISODE_ADVANCE"
+if [ "$EPISODE_ADVANCE" = "manual" ]; then
+  echo "[record]   エピソード終了後: a = 両腕を開始姿勢へ戻す -> 環境を整える -> 右矢印 = 次を開始"
+  echo "[record]   左矢印 = 直前のテイクを破棄して録り直す / esc = 収集終了"
+  echo "[record]   a を押す前に、腕と机から手を引くこと(3.5秒ほど両腕が自律動作する)"
+  if [ -n "$START_POSE_TOL_DEG" ]; then
+    echo "[record]   戻し後の検算: ${START_POSE_TOL_DEG}deg  log=$START_POSE_LOG"
+  else
+    echo "[record]   戻し後の検算: 無効(戻し操作は行うが成否を確認しない)"
+  fi
 else
-  echo "[record] start-pose gate: disabled (manual reset only)"
+  echo "[record]   時間駆動: reset_time_s=${RESET_TIME_S}s の窓が過ぎたら自動で次へ"
+  if [ -n "$START_POSE_TOL_DEG" ]; then
+    echo "[record]   開始姿勢ゲート: tolerance=${START_POSE_TOL_DEG}deg  max_wait=${START_POSE_MAX_WAIT_S}s  log=$START_POSE_LOG"
+    echo "[record]   ゲート待機中のキー: a = 腕を戻す / 右矢印 = そのまま録る / esc = 停止"
+  else
+    echo "[record]   開始姿勢ゲート: 無効(従来の手動リセットのみ)"
+  fi
 fi
 
 lerobot-record \
