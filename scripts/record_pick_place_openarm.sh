@@ -73,6 +73,17 @@ DISPLAY_DATA="${DISPLAY_DATA:-true}"        # set false for headless dry-run
 # ---- Start pose alignment (captured "ready" pose, optional) ------------------
 # キャプチャ済み(scripts/capture_initial_pose.sh $SIDE)なら follower/leader の
 # 整列先に使う。未キャプチャなら公式既定(肘36°)にフォールバック。
+#
+# 開始姿勢の固定はこう働く:
+#   - セッション開始: robot/teleop の connect() 時に align_on_connect が発火し、
+#     両腕がこの ready 姿勢へ自動整列する(= セッション開始姿勢は自動で固定)。
+#     グリッパは常に閉鎖ゼロへピン留め。
+#   - エピソード間: lerobot-record のリセットは reset_time_s の手動ウィンドウ
+#     (teleop 運転)。leader を手でこの ready 姿勢に戻してから次エピソードを
+#     開始すること(自動復帰は record 側には無い。推論側 run_rollout.sh は
+#     reset_to_initial_position で自動復帰する)。
+#   - 収集セッションを跨ぐ場合も同じ ready YAML を使い続ける(較正=恒久ゼロ +
+#     同一 YAML で、セッション間の座標系ずれ・開始姿勢ずれの両方を防ぐ)。
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 POSE="$REPO/config/initial_pose_${SIDE}.yaml"
 POSE_ARGS=()

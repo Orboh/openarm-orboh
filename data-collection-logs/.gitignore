@@ -1,0 +1,6 @@
+# raw collection logs / manifests are local-only (do not bloat the repo)
+*.log
+*.manifest.json
+# keep the dir's docs
+!README.md
+!.gitignore
