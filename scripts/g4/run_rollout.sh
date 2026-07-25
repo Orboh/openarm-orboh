@@ -33,6 +33,19 @@ if [[ "${1:-}" == "--" ]]; then shift; fi
 TAG=$(printf '%s' "$TAG" | tr -c 'A-Za-z0-9-' '-' | sed 's/-\{2,\}/-/g; s/^-//; s/-$//')
 [[ -z "$TAG" ]] && TAG="untagged"
 
+# --- 記録フラグ guard（2026-07-24・2026-07-22 破綻=記録フラグ付け忘れの恒久対処）---
+# --log_obs_every_step を明示しない実行を弾く。true は毎ステップ観測を取り直して制御周期を
+# 食うため無条件強制はしない——毎ステップ記録(true・事前に dry-run で t_sec≈1/fps を確認)か
+# 1Hz記録(false)かを実行者に明示させ、付け忘れ事故を構造的に防ぐ。
+_has_obs_flag=false
+for _a in "$@"; do case "$_a" in --log_obs_every_step*) _has_obs_flag=true ;; esac; done
+if [[ "$_has_obs_flag" == false ]]; then
+  echo "ERROR: --log_obs_every_step を明示してください（既定 false・付け忘れが 2026-07-22 破綻の主因）。" >&2
+  echo "  毎ステップ角/frames を残す → --log_obs_every_step=true（事前に --dry_run=true で t_sec が 1/fps に収まるか確認）" >&2
+  echo "  1Hz(chunk先頭)記録で可     → --log_obs_every_step=false" >&2
+  exit 2
+fi
+
 TS=$(date -u +%Y%m%dT%H%M%SZ)
 RUN_DIR="$HOME/rollouts/${TS}-${TAG}"
 mkdir -p "$RUN_DIR"
