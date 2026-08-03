@@ -1,0 +1,450 @@
+#!/usr/bin/env python3
+"""1収集セッションの環境スナップショット(manifest.json)を書く。
+
+設計正本: orboh-company-vault
+  07Member's-free-space/Kento/02-Tech-Plan/02VLA/collection-recording-manual.md
+
+manifest は設定の全文を持たない。lerobot は起動時に解決済み設定を丸ごと
+ダンプしており(stderr)、それは console.log に入っている。ここに書くのは
+**ダンプから取れない新規事実6系統**だけ:
+
+  1. openarm-orboh / lerobot の branch・commit・未コミット数
+  2. python・pinocchio・lerobot の版
+  3. stamp 後の実 repo_id (ダンプは stamp より前に出るので構造的に出ない)
+  4. 較正ファイルの sha256 と mtime
+  5. HF 身元 (push 時に追記。収録時はオフラインで取れない)
+  6. マージ順と run 毎 ep 数 (統合後に台帳と突合する鍵)
+
+加えて不一致検査のためだけに4統制変数を意図的に複製する
+(side / カメラ serial / fps / GRAVITY_SCALE)。これらが複数セッションで
+食い違ったらデータは混ぜられないので、ダンプを読まずに機械照合できる
+場所に置いておく価値がある。それ以外は console.log へのポインタで済ます。
+
+使い方:
+  collect_manifest.py init        --run-dir DIR ... > manifest.json を書く
+  collect_manifest.py resolve     --run-dir DIR     ... 実行後に artifacts を埋める
+  collect_manifest.py check-scene --scene-path P    ... TODO の数だけを出す
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import platform
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+SCHEMA = "orboh-collection-manifest/1"
+MANIFEST_NAME = "manifest.json"
+
+
+# --- 小道具 -----------------------------------------------------------------
+
+
+def _utc(ts: float) -> str:
+    return datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _sha256(path: Path) -> str | None:
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
+def _git(repo: Path, *args: str) -> str | None:
+    """git を1回叩く。repo が git でない/git が無い場合は None。"""
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(repo), *args],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if out.returncode != 0:
+        return None
+    return out.stdout.strip()
+
+
+def _repo_info(repo: Path | None) -> dict:
+    """branch / commit / 未コミット数。値が取れない箇所は None で埋める。
+
+    未コミット数を持つのは、コミットされていない変更で録ったセッションは
+    commit だけでは再現できない = 後から「このコードで録った」と言えないため。
+    0 でないこと自体が警告になる。
+    """
+    if repo is None or not repo.exists():
+        return {"root": str(repo) if repo else None, "branch": None, "commit": None, "dirty_files": None}
+    porcelain = _git(repo, "status", "--porcelain")
+    dirty = len([line for line in porcelain.splitlines() if line.strip()]) if porcelain is not None else None
+    return {
+        "root": str(repo),
+        "branch": _git(repo, "rev-parse", "--abbrev-ref", "HEAD"),
+        "commit": _git(repo, "rev-parse", "HEAD"),
+        "dirty_files": dirty,
+    }
+
+
+def _lerobot_paths() -> tuple[Path | None, Path | None, Path | None, str | None]:
+    """lerobot の repo root / HF_LEROBOT_HOME / 較正ルート / 版。
+
+    定数は lerobot 自身から読む。環境変数 HF_LEROBOT_HOME /
+    HF_LEROBOT_CALIBRATION での上書きを自前で再実装すると必ずずれるため。
+    """
+    try:
+        import lerobot
+        from lerobot.utils.constants import HF_LEROBOT_CALIBRATION, HF_LEROBOT_HOME
+    except Exception:
+        return None, None, None, None
+    mod = Path(lerobot.__file__).resolve()
+    # src/lerobot/__init__.py -> repo root は2つ上
+    root = mod.parents[2] if len(mod.parents) >= 3 else None
+    version = getattr(lerobot, "__version__", None)
+    return root, Path(HF_LEROBOT_HOME), Path(HF_LEROBOT_CALIBRATION), version
+
+
+def _calibration_entries(calib_root: Path | None, side: str) -> list[dict]:
+    """follower/leader の較正ファイルの sha256 と mtime。
+
+    較正が変わると開始姿勢の基準そのものが変わるので、どの較正で録ったかは
+    データの意味を決める。ファイルが無い場合も「無かった」ことを記録する
+    (存在しない = 恒久零が起動していない可能性の手がかりになる)。
+    """
+    specs = [
+        ("robot", "robots", "openarm_follower", f"follower_{side}"),
+        ("teleop", "teleoperators", "openarm_leader", f"leader_{side}"),
+    ]
+    entries = []
+    for role, bucket, type_name, dev_id in specs:
+        entry = {"role": role, "type": type_name, "id": dev_id, "path": None, "sha256": None, "mtime_utc": None}
+        if calib_root is not None:
+            path = calib_root / bucket / type_name / f"{dev_id}.json"
+            entry["path"] = str(path)
+            if path.is_file():
+                entry["sha256"] = _sha256(path)
+                entry["mtime_utc"] = _utc(path.stat().st_mtime)
+        entries.append(entry)
+    return entries
+
+
+def _scene_block(scene_name: str | None, scene_path: Path | None) -> dict:
+    """シーンプロファイルの名前と sha、そして未確定(TODO)の数。
+
+    sha を持つ理由: 名前は同じまま中身を書き換えられてしまうため、名前だけでは
+    「同じ物理条件で録った」を保証できない。sha が一致すれば同一と機械で言える。
+
+    todo_count を持つ理由: TODO のまま録ると、そのセッションは「まだ値の入って
+    いない版」の sha を指す。あとで値を埋めると sha が変わり、そのセッションだけ
+    存在しない条件を指したまま孤立する。数を残しておけば後から検出できる。
+    """
+    block = {"name": scene_name, "path": None, "sha256": None, "todo_count": None}
+    if scene_name in (None, "", "none"):
+        block["name"] = None
+        return block
+    if scene_path is None or not scene_path.is_file():
+        return block
+    block["path"] = str(scene_path)
+    block["sha256"] = _sha256(scene_path)
+    block["todo_count"] = count_scene_todos(scene_path)
+    return block
+
+
+def count_scene_todos(scene_path: Path) -> int | None:
+    """値が TODO のままのキーを数える。yaml が無ければ素朴に行を数える。"""
+    try:
+        import yaml
+    except Exception:
+        try:
+            text = scene_path.read_text(encoding="utf-8")
+        except OSError:
+            return None
+        return sum(1 for line in text.splitlines() if not line.lstrip().startswith("#") and ": TODO" in line)
+    try:
+        data = yaml.safe_load(scene_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+    def walk(node):
+        if isinstance(node, dict):
+            for value in node.values():
+                yield from walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                yield from walk(value)
+        elif node == "TODO":
+            yield 1
+
+    return sum(walk(data))
+
+
+# --- init -------------------------------------------------------------------
+
+
+def cmd_init(args: argparse.Namespace) -> int:
+    run_dir = Path(args.run_dir)
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    lerobot_root, _hf_home, calib_root, lerobot_version = _lerobot_paths()
+    if args.lerobot_root:
+        lerobot_root = Path(args.lerobot_root)
+
+    try:
+        import pinocchio
+
+        pin_version = getattr(pinocchio, "__version__", "unknown")
+    except Exception:
+        # Vector には入っていない(重力補償は Thor だけ)。取れないことを記録する。
+        pin_version = None
+
+    scene_path = Path(args.scene_path) if args.scene_path else None
+    scene = _scene_block(args.scene, scene_path)
+
+    cameras = {"chest": args.cam_serial}
+    if args.wrist_serial:
+        cameras[f"wrist_{args.side}"] = args.wrist_serial
+
+    manifest = {
+        "schema": SCHEMA,
+        "identity": {
+            "session_id": args.session_id,
+            "run_dir": str(run_dir),
+            "started_utc": args.started_utc,
+            "host": platform.node(),
+        },
+        "people": {
+            # operator を必須にするのは、操作者が違えばデモの癖が変わり、
+            # 少数データの模倣学習では交絡要因になるため。
+            "operator": args.operator,
+            "judge": args.judge or None,
+        },
+        "scene": scene,
+        "code": {
+            "openarm_orboh": _repo_info(Path(args.repo_root) if args.repo_root else None),
+            "lerobot": _repo_info(lerobot_root),
+        },
+        "env": {
+            "python": platform.python_version(),
+            "pinocchio": pin_version,
+            "lerobot": lerobot_version,
+            "platform": platform.platform(),
+        },
+        "calibration": _calibration_entries(calib_root, args.side),
+        # 不一致検査用の意図的な複製。ここが食い違うセッションは混ぜられない。
+        "control_variables": {
+            "side": args.side,
+            "cameras": cameras,
+            "fps": args.fps,
+            "gravity_scale": args.gravity_scale,
+        },
+        "artifacts": {
+            "repo_id_requested": args.repo_id,
+            # stamp 後の実 repo_id。ダンプは stamp より前に出るので実行後に解決する。
+            "repo_id_stamped": None,
+            "dataset_root": None,
+            "episodes_recorded": None,
+            "revision": None,
+            # HF 身元とマージ情報は収録時に取れない(オフライン / 統合はあとの工程)。
+            "hf_identity": None,
+            "merge_order": None,
+            "exit_code": None,
+        },
+        # 人があとで埋める欄。空のまま残っていること自体が回収漏れの印になる。
+        "human_fields": {
+            "scatter_actual": None,
+            "anomalies": None,
+        },
+        "pointers": {
+            "console_log": "console.log",
+            "start_pose_log": f"start-pose-{args.side}.jsonl",
+            "command": "command.sh",
+            "note": (
+                "解決済み設定の全文は console.log の設定ダンプにある。"
+                "manifest はそれを再記録せず、ダンプから取れない事実だけを持つ。"
+            ),
+        },
+    }
+
+    out = run_dir / MANIFEST_NAME
+    out.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    # 呼び出し側(shell)が判断に使えるように、警告は stderr へ、要点は stdout へ。
+    print(str(out))
+    todo = scene.get("todo_count")
+    if todo:
+        print(
+            f"[manifest] 警告: シーンプロファイルに TODO が {todo} 件残っている: {scene.get('path')}",
+            file=sys.stderr,
+        )
+    for repo_key in ("openarm_orboh", "lerobot"):
+        dirty = manifest["code"][repo_key]["dirty_files"]
+        if dirty:
+            print(
+                f"[manifest] 警告: {repo_key} に未コミットの変更が {dirty} 件ある"
+                "(commit だけではこのセッションを再現できない)",
+                file=sys.stderr,
+            )
+    for entry in manifest["calibration"]:
+        if entry["sha256"] is None:
+            print(
+                f"[manifest] 警告: 較正ファイルが無い: {entry['path']}"
+                "(恒久零が起動していない可能性)",
+                file=sys.stderr,
+            )
+    return 0
+
+
+# --- resolve ----------------------------------------------------------------
+
+
+def _find_stamped(hf_home: Path, repo_id: str, started_ts: float) -> list[Path]:
+    """stamp 後のデータセットディレクトリを探す。
+
+    stamp_repo_id() は repo_id に `_YYYYmmdd_HHMMSS` を **ローカル時刻で**
+    足す(configs/dataset.py)。run_dir は UTC 名なので文字列では突き合わせ
+    られない。よって「要求した repo_id で始まり、この run の開始以降に
+    作られたディレクトリ」で引く。
+    """
+    if "/" in repo_id:
+        org, name = repo_id.split("/", 1)
+        parent = hf_home / org
+    else:
+        parent = hf_home
+        name = repo_id
+    if not parent.is_dir():
+        return []
+    hits = []
+    for child in parent.iterdir():
+        if not child.is_dir() or not child.name.startswith(f"{name}_"):
+            continue
+        try:
+            if child.stat().st_mtime + 1 < started_ts:
+                continue
+        except OSError:
+            continue
+        hits.append(child)
+    return sorted(hits, key=lambda p: p.stat().st_mtime)
+
+
+def _episode_count(dataset_root: Path) -> int | None:
+    info = dataset_root / "meta" / "info.json"
+    try:
+        return json.loads(info.read_text(encoding="utf-8")).get("total_episodes")
+    except Exception:
+        return None
+
+
+def cmd_check_scene(args: argparse.Namespace) -> int:
+    """TODO の数だけを stdout に出す。shell 側のガードから呼ぶ。
+
+    数えられなかった場合は何も出さない(shell は「不明」として扱い、
+    ガードを掛けずに進む。数えられないことで収集を止めるのは筋が悪い)。
+    """
+    path = Path(args.scene_path)
+    if not path.is_file():
+        return 0
+    count = count_scene_todos(path)
+    if count is None:
+        return 0
+    print(count)
+    return 0
+
+
+def cmd_resolve(args: argparse.Namespace) -> int:
+    run_dir = Path(args.run_dir)
+    path = run_dir / MANIFEST_NAME
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+    except OSError:
+        print(f"[manifest] resolve 対象が無い: {path}", file=sys.stderr)
+        return 0  # 収集自体は終わっているので、ここで失敗させない
+    except json.JSONDecodeError as exc:
+        print(f"[manifest] manifest.json が壊れている({exc}): {path}", file=sys.stderr)
+        return 0
+
+    artifacts = manifest.setdefault("artifacts", {})
+    if args.exit_code is not None:
+        artifacts["exit_code"] = args.exit_code
+
+    _root, hf_home, _calib, _ver = _lerobot_paths()
+    repo_id = artifacts.get("repo_id_requested")
+    started = manifest.get("identity", {}).get("started_utc")
+    try:
+        started_ts = datetime.strptime(started, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).timestamp()
+    except (TypeError, ValueError):
+        started_ts = 0.0
+
+    if hf_home is not None and repo_id:
+        hits = _find_stamped(hf_home, repo_id, started_ts)
+        if len(hits) == 1:
+            chosen = hits[0]
+        elif len(hits) > 1:
+            chosen = hits[-1]
+            print(
+                "[manifest] 警告: この run 以降に作られた候補が複数ある。最新を採った: "
+                + ", ".join(p.name for p in hits),
+                file=sys.stderr,
+            )
+        else:
+            chosen = None
+            print(
+                f"[manifest] 警告: stamp 後のデータセットが見つからない(要求 repo_id={repo_id})。"
+                "収集が1本も保存されなかったか、HF_LEROBOT_HOME が違う。",
+                file=sys.stderr,
+            )
+        if chosen is not None:
+            artifacts["dataset_root"] = str(chosen)
+            org = repo_id.split("/", 1)[0] if "/" in repo_id else None
+            artifacts["repo_id_stamped"] = f"{org}/{chosen.name}" if org else chosen.name
+            artifacts["episodes_recorded"] = _episode_count(chosen)
+
+    path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    print(str(path))
+    return 0
+
+
+# --- CLI --------------------------------------------------------------------
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    init = sub.add_parser("init", help="収集の前に manifest.json を書く")
+    init.add_argument("--run-dir", required=True)
+    init.add_argument("--session-id", required=True)
+    init.add_argument("--started-utc", required=True)
+    init.add_argument("--operator", required=True)
+    init.add_argument("--judge", default="")
+    init.add_argument("--scene", default="")
+    init.add_argument("--scene-path", default="")
+    init.add_argument("--side", required=True)
+    init.add_argument("--cam-serial", required=True)
+    init.add_argument("--wrist-serial", default="")
+    init.add_argument("--fps", type=int, required=True)
+    init.add_argument("--gravity-scale", type=float, required=True)
+    init.add_argument("--repo-id", required=True)
+    init.add_argument("--repo-root", default="")
+    init.add_argument("--lerobot-root", default="")
+    init.set_defaults(func=cmd_init)
+
+    res = sub.add_parser("resolve", help="収集の後に stamp 後 repo_id と ep 数を埋める")
+    res.add_argument("--run-dir", required=True)
+    res.add_argument("--exit-code", type=int, default=None)
+    res.set_defaults(func=cmd_resolve)
+
+    chk = sub.add_parser("check-scene", help="シーンプロファイルの TODO 件数を出す")
+    chk.add_argument("--scene-path", required=True)
+    chk.set_defaults(func=cmd_check_scene)
+
+    args = parser.parse_args(argv)
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -27,9 +27,13 @@
 #   NUM_EPISODES=2 DISPLAY_DATA=false bash scripts/record_pick_place_openarm.sh t # dry run
 #
 # 1収集セッション = 1 run_dir: ~/collections/<UTC>-<scene-tag>/ に
-#   console.log(端末全文・設定ダンプ込み) と start-pose-<side>.jsonl が残る。
+#   console.log(端末全文・設定ダンプ込み) / start-pose-<side>.jsonl /
+#   manifest.json(環境スナップショット) / command.sh(再実行用) が残る。
 #   RUN_DIR=... で置き場所を上書きできる。既存ディレクトリには書かない。
-#   manifest.json / command.sh / ledger.csv / notes.md は未実装(バックログ2・4)。
+#   ledger.csv / notes.md / setup/ と Vault への回収(pull_run.sh)は未実装(バックログ4)。
+#
+# 必須の環境変数: OPERATOR(録った人) と SCENE(scenes/<name>.yaml の name)。
+#   条件を残さない dry run は SCENE=none / TODO 入りシーンは ALLOW_TODO_SCENE=true。
 set -euo pipefail
 
 # ---- Arm pair (channel_id fixed CAN names -- USB/PC independent) -------------
@@ -96,6 +100,71 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 POSE="$REPO/config/initial_pose_${SIDE}.yaml"
 POSE_ARGS=()
 [ -f "$POSE" ] && POSE_ARGS+=(--robot.initial_pose_path="$POSE" --teleop.initial_pose_path="$POSE")
+
+# ---- 人とシーン(人が入れる3つのうち2つ) --------------------------------------
+# OPERATOR を必須にするのは、操作者が違うとデモの癖が変わり、少数データの模倣
+# 学習では交絡要因になるから。実際に bottle 25ep は3人混在(Kento/Satomi/Aoi)で
+# 訓練セットにできなくなった。JUDGE(成否の判定者)は収録後に決まることもあるので任意。
+OPERATOR="${OPERATOR:-}"
+JUDGE="${JUDGE:-}"
+if [ -z "$OPERATOR" ]; then
+  echo "[record] OPERATOR が未指定。誰が録ったか分からないデータは学習に使えない。" >&2
+  echo "[record] 例: OPERATOR=Kento SCENE=bottle-desk-v1 bash scripts/record_pick_place_openarm.sh <tag>" >&2
+  exit 1
+fi
+
+# SCENE = scenes/<name>.yaml の <name>。机の高さ・照明・散らし方といった
+# 「ソフトから見えない物理」の正本で、manifest には名前と sha が焼かれる。
+# sha を持つのは、名前が同じまま中身を書き換えられても検出できるようにするため。
+SCENE="${SCENE:-}"
+SCENE_PATH=""
+if [ -z "$SCENE" ]; then
+  echo "[record] SCENE が未指定。物理条件が記録されず、あとから条件を復元できない。" >&2
+  echo "[record] 利用可能なシーン:" >&2
+  if [ -d "$REPO/scenes" ]; then
+    ls -1 "$REPO/scenes" | sed 's/\.yaml$//; s/^/[record]   /' >&2
+  else
+    echo "[record]   (scenes/ が無い)" >&2
+  fi
+  echo "[record] 条件を残さない dry run なら SCENE=none" >&2
+  exit 1
+fi
+if [ "$SCENE" != "none" ]; then
+  SCENE_PATH="$REPO/scenes/${SCENE}.yaml"
+  if [ ! -f "$SCENE_PATH" ]; then
+    echo "[record] シーンプロファイルが無い: $SCENE_PATH" >&2
+    exit 1
+  fi
+fi
+
+# manifest を書く python。lerobot の定数(HF_LEROBOT_HOME・較正ルート)は lerobot
+# 自身から読ませたいので、lerobot-record と同じインタプリタを使う(shebang から取る)。
+PYTHON_BIN="${PYTHON_BIN:-}"
+if [ -z "$PYTHON_BIN" ]; then
+  LR_BIN="$(command -v lerobot-record || true)"
+  if [ -n "$LR_BIN" ]; then
+    PYTHON_BIN="$(head -1 "$LR_BIN" | sed -e 's/^#!//' -e 's/[[:space:]].*$//')"
+  fi
+  if [ ! -x "${PYTHON_BIN:-}" ]; then PYTHON_BIN=python3; fi
+fi
+MANIFEST_TOOL="$REPO/scripts/collect_manifest.py"
+
+# TODO が残ったままでは録らせない。TODO 版の sha でセッションを記録すると、
+# あとで実測値を入れた時に sha が変わり、そのセッションだけ「もう存在しない版の
+# 条件」を指したまま孤立する(遡って直せない)。
+if [ -n "$SCENE_PATH" ]; then
+  TODO_N="$("$PYTHON_BIN" "$MANIFEST_TOOL" check-scene --scene-path "$SCENE_PATH" 2>/dev/null || echo "")"
+  if printf '%s' "$TODO_N" | grep -qE '^[0-9]+$' && [ "$TODO_N" -gt 0 ]; then
+    if [ "${ALLOW_TODO_SCENE:-false}" != "true" ]; then
+      echo "[record] シーンプロファイルに未確定(TODO)が $TODO_N 件残っている: $SCENE_PATH" >&2
+      echo "[record] 実測値を入れてから録ること。TODO 版で録ると、あとで埋めた時に sha が" >&2
+      echo "[record] 変わり、このセッションだけ条件を辿れなくなる。" >&2
+      echo "[record] 条件を残さない dry run なら ALLOW_TODO_SCENE=true" >&2
+      exit 1
+    fi
+    echo "[record] 警告: TODO $TODO_N 件のシーンで録る(ALLOW_TODO_SCENE=true)。条件は復元できない。" >&2
+  fi
+fi
 
 # ---- run_dir: 1収集セッション = 1ディレクトリ --------------------------------
 # 第1引数がシーンタグ(机の配置や対象物の識別。英数ハイフンのみ)。
@@ -197,6 +266,83 @@ fi
   fi
 } 2>&1 | tee "$CONSOLE_LOG"
 
+# ---- manifest.json ------------------------------------------------------------
+# manifest は設定の全文を持たない。lerobot が起動時に解決済み設定を丸ごとダンプ
+# していて、それは console.log に入っている。ここに残すのはダンプから取れない
+# 事実だけ(コードの版・較正の sha・stamp 後の repo_id・python/pinocchio 版)。
+# 書けなくても収集は止めない: 目の前に実機と人が居る場面で、メタデータの不調で
+# 収録を落とす方が損失が大きい。代わりに警告を console.log に残す。
+SESSION_ID="${TS}-${TAG}"
+STARTED_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+MANIFEST_ARGS=(
+  init
+  --run-dir "$RUN_DIR"
+  --session-id "$SESSION_ID"
+  --started-utc "$STARTED_UTC"
+  --operator "$OPERATOR"
+  --judge "$JUDGE"
+  --scene "$SCENE"
+  --scene-path "$SCENE_PATH"
+  --side "$SIDE"
+  --cam-serial "$CAM_SERIAL"
+  --fps "$FPS"
+  --gravity-scale "$GRAVITY_SCALE"
+  --repo-id "$REPO_ID"
+  --repo-root "$REPO"
+)
+if [ "$WRIST" = "true" ]; then
+  MANIFEST_ARGS+=(--wrist-serial "$WRIST_SERIAL")
+fi
+MANIFEST_INIT_OUT="$RUN_DIR/.manifest-init.out"
+MANIFEST_OK=true
+if ! "$PYTHON_BIN" "$MANIFEST_TOOL" "${MANIFEST_ARGS[@]}" > "$MANIFEST_INIT_OUT" 2>&1; then
+  MANIFEST_OK=false
+fi
+
+# ---- command.sh --------------------------------------------------------------
+# 同じ条件で起動し直すための行。フラグの全列挙はしない(設定ダンプと二重になり
+# ドリフト源になる)。環境変数の解決値だけを allowlist で残し、詳細は console.log
+# と manifest.json を指す。ダンプが落とす type 判別子はコメントで明示する。
+if [ "$WRIST" = "true" ]; then
+  CAM_NOTE="chest D435i + wrist_${SIDE} D405 (type=intelrealsense)"
+else
+  CAM_NOTE="chest D435i (type=intelrealsense)"
+fi
+COMMAND_SH="$RUN_DIR/command.sh"
+{
+  echo '#!/usr/bin/env bash'
+  echo "# 自動生成: このセッションを同じ条件で起動し直す行。"
+  echo "# 解決済み設定の全文 -> console.log / 環境スナップショット -> manifest.json"
+  echo "# 設定ダンプが落とす type 判別子: robot.type=openarm_follower / teleop.type=openarm_leader"
+  echo "# カメラ: $CAM_NOTE"
+  echo "set -euo pipefail"
+  printf 'OPERATOR=%q \\\n' "$OPERATOR"
+  printf 'JUDGE=%q \\\n' "$JUDGE"
+  printf 'SCENE=%q \\\n' "$SCENE"
+  printf 'SIDE=%q \\\n' "$SIDE"
+  printf 'CAM_SERIAL=%q \\\n' "$CAM_SERIAL"
+  printf 'WRIST=%q WRIST_SERIAL=%q \\\n' "$WRIST" "$WRIST_SERIAL"
+  printf 'CAMERA_W=%q CAMERA_H=%q FPS=%q \\\n' "$CAMERA_W" "$CAMERA_H" "$FPS"
+  printf 'NUM_EPISODES=%q EPISODE_TIME_S=%q RESET_TIME_S=%q \\\n' "$NUM_EPISODES" "$EPISODE_TIME_S" "$RESET_TIME_S"
+  printf 'REPO_ID=%q \\\n' "$REPO_ID"
+  printf 'TASK=%q \\\n' "$TASK"
+  printf 'GRAVITY_COMP=%q GRAVITY_SCALE=%q GRAVITY_URDF=%q \\\n' "$GRAVITY_COMP" "$GRAVITY_SCALE" "$GRAVITY_URDF"
+  printf 'EPISODE_ADVANCE=%q START_POSE_TOL_DEG=%q START_POSE_MAX_WAIT_S=%q \\\n' \
+    "$EPISODE_ADVANCE" "$START_POSE_TOL_DEG" "$START_POSE_MAX_WAIT_S"
+  printf 'DISPLAY_DATA=%q \\\n' "$DISPLAY_DATA"
+  printf 'bash scripts/record_pick_place_openarm.sh %q\n' "$TAG"
+} > "$COMMAND_SH"
+chmod +x "$COMMAND_SH"
+
+{
+  sed 's/^/[record] manifest: /' "$MANIFEST_INIT_OUT"
+  if [ "$MANIFEST_OK" != true ]; then
+    echo "[record] 警告: manifest.json を書けなかった。環境スナップショットが残らない。"
+  fi
+  echo "[record] command.sh: $COMMAND_SH"
+} 2>&1 | tee -a "$CONSOLE_LOG"
+rm -f "$MANIFEST_INIT_OUT"
+
 # set -e を一時的に外す: pipefail 下で lerobot が非0終了すると、ここで即座に
 # 抜けて終了メッセージも終了コードの伝播も走らなくなる。PIPESTATUS[0] で
 # lerobot 自身の終了コードを取り(tee の 0 で隠さない)、最後に伝播させる。
@@ -227,12 +373,24 @@ lerobot-record \
 RC=${PIPESTATUS[0]}
 set -e
 
+# stamp 後の実 repo_id は、設定ダンプが stamp_repo_id() より前に出る構造なので
+# 実行後にしか分からない。ここでファイルシステムから引いて manifest に追記する
+# (stamp はローカル時刻・run_dir は UTC 名なので、文字列では突き合わせられない)。
+MANIFEST_RESOLVE_OUT="$RUN_DIR/.manifest-resolve.out"
+if ! "$PYTHON_BIN" "$MANIFEST_TOOL" resolve --run-dir "$RUN_DIR" --exit-code "$RC" \
+     > "$MANIFEST_RESOLVE_OUT" 2>&1; then
+  echo "[record] 警告: manifest の事後解決に失敗した(stamp 後 repo_id が未記録)" >> "$MANIFEST_RESOLVE_OUT"
+fi
+
 {
   echo "[record] lerobot-record exit=$RC"
+  sed 's/^/[record] manifest: /' "$MANIFEST_RESOLVE_OUT"
   echo "[record] 記録: $RUN_DIR"
   ls -1 "$RUN_DIR" | sed 's/^/[record]   /'
-  echo "[record] 次: 軽量メタを Vault へ回収する(pull_run.sh・未実装)。"
-  echo "[record]     manifest.json / command.sh / ledger.csv / notes.md も未実装(バックログ2・4)。"
+  echo "[record] 次: 軽量メタを Vault へ回収する(pull_run.sh・未実装=バックログ4)。"
+  echo "[record]     ledger.csv / notes.md / setup/ も未実装(同4)。"
+  echo "[record]     manifest.json の human_fields(散らした範囲・異常)は人が埋める。"
 } 2>&1 | tee -a "$CONSOLE_LOG"
+rm -f "$MANIFEST_RESOLVE_OUT"
 
 exit "$RC"
