@@ -21,9 +21,15 @@
 #      モータ側零位を外部ツールで焼き直したら再較正すること)
 #
 # Usage:
-#   bash scripts/record_pick_place_openarm.sh                                     # chest-only (monocular baseline)
-#   WRIST=true bash scripts/record_pick_place_openarm.sh                          # chest + D405 wrist (2-cam, separate dataset)
-#   NUM_EPISODES=2 DISPLAY_DATA=false bash scripts/record_pick_place_openarm.sh   # dry run
+#   bash scripts/record_pick_place_openarm.sh <scene-tag>                         # 第1引数=シーンタグ(英数ハイフン)
+#   bash scripts/record_pick_place_openarm.sh bottle-desk50-bright                # 例
+#   WRIST=true bash scripts/record_pick_place_openarm.sh <tag>                    # chest + D405 wrist (2-cam, separate dataset)
+#   NUM_EPISODES=2 DISPLAY_DATA=false bash scripts/record_pick_place_openarm.sh t # dry run
+#
+# 1収集セッション = 1 run_dir: ~/collections/<UTC>-<scene-tag>/ に
+#   console.log(端末全文・設定ダンプ込み) と start-pose-<side>.jsonl が残る。
+#   RUN_DIR=... で置き場所を上書きできる。既存ディレクトリには書かない。
+#   manifest.json / command.sh / ledger.csv / notes.md は未実装(バックログ2・4)。
 set -euo pipefail
 
 # ---- Arm pair (channel_id fixed CAN names -- USB/PC independent) -------------
@@ -91,6 +97,31 @@ POSE="$REPO/config/initial_pose_${SIDE}.yaml"
 POSE_ARGS=()
 [ -f "$POSE" ] && POSE_ARGS+=(--robot.initial_pose_path="$POSE" --teleop.initial_pose_path="$POSE")
 
+# ---- run_dir: 1収集セッション = 1ディレクトリ --------------------------------
+# 第1引数がシーンタグ(机の配置や対象物の識別。英数ハイフンのみ)。
+# 記録の外付けであり収集ループには触らない。推論側 scripts/g4/run_rollout.sh の
+# 同じ設計を移植したもの。
+#
+# なぜ tee が要るか: lerobot は起動時に設定の全文をダンプするが、それは stdout で
+# なく stderr に出る。`2>&1` を付けないと console.log に1行も入らない。さらに
+# パイプ越しだと Python が出力をブロックバッファするので PYTHONUNBUFFERED=1 が
+# 無いと途中まで書かれず、異常終了時に肝心の直前ログが失われる。
+TAG="${1:-untagged}"
+if ! printf '%s' "$TAG" | grep -qE '^[A-Za-z0-9-]+$'; then
+  echo "[record] scene-tag は英数ハイフンのみ: '$TAG'" >&2
+  echo "[record] 例: bash scripts/record_pick_place_openarm.sh bottle-desk50-bright" >&2
+  exit 1
+fi
+TS="$(date -u +%Y%m%dT%H%M%SZ)"
+RUN_DIR="${RUN_DIR:-$HOME/collections/${TS}-${TAG}}"
+if [ -e "$RUN_DIR" ]; then
+  echo "[record] run_dir が既に存在する(上書きしない): $RUN_DIR" >&2
+  exit 1
+fi
+mkdir -p "$RUN_DIR"
+CONSOLE_LOG="$RUN_DIR/console.log"
+export PYTHONUNBUFFERED=1
+
 # ---- エピソードの進め方 / 開始姿勢の扱い -------------------------------------
 # EPISODE_ADVANCE=manual (既定): エピソードの区切りを人が握る。
 #   1 エピソード収録が終わる
@@ -125,7 +156,10 @@ else
   START_POSE_TOL_DEG="${START_POSE_TOL_DEG-8}"
 fi
 START_POSE_MAX_WAIT_S="${START_POSE_MAX_WAIT_S:-120}"   # auto モードのゲート待ち上限のみに効く
-START_POSE_LOG="${START_POSE_LOG:-$REPO/data-collection-logs/start-pose-$(date +%Y%m%d-%H%M%S)-${SIDE}.jsonl}"
+# run_dir 配下に置く: 1セッションの記録が1ディレクトリに揃っていないと、後で
+# pull_run.sh がホワイトリストで回収できない。旧既定の data-collection-logs/ は
+# .gitignore 配下で、run_dir と二重管理になっていた。
+START_POSE_LOG="${START_POSE_LOG:-$RUN_DIR/start-pose-${SIDE}.jsonl}"
 GATE_ARGS=(--episode_advance="$EPISODE_ADVANCE")
 if [ -n "$START_POSE_TOL_DEG" ]; then
   GATE_ARGS+=(
@@ -135,30 +169,38 @@ if [ -n "$START_POSE_TOL_DEG" ]; then
   )
 fi
 
-echo "[record] side=$SIDE  follower=$FOLLOWER_PORT  leader=$LEADER_PORT"
-echo "[record] cameras=$CAMERAS"
-echo "[record] wrist=$WRIST  repo_id=$REPO_ID  episodes=$NUM_EPISODES  ${CAMERA_W}x${CAMERA_H}@${FPS}fps"
-echo "[record] gravity_comp=$GRAVITY_COMP scale=$GRAVITY_SCALE side=$SIDE urdf=$GRAVITY_URDF"
-echo "[record] episode_advance=$EPISODE_ADVANCE"
-if [ "$EPISODE_ADVANCE" = "manual" ]; then
-  echo "[record]   エピソード終了後: a = 両腕を開始姿勢へ戻す -> 環境を整える -> 右矢印 = 次を開始"
-  echo "[record]   左矢印 = 直前のテイクを破棄して録り直す / esc = 収集終了"
-  echo "[record]   a を押す前に、腕と机から手を引くこと(3.5秒ほど両腕が自律動作する)"
-  if [ -n "$START_POSE_TOL_DEG" ]; then
-    echo "[record]   戻し後の検算: ${START_POSE_TOL_DEG}deg  log=$START_POSE_LOG"
+# 設定要約も console.log に入れる(ここで新規作成し、以降は追記)。
+{
+  echo "[record] run_dir=$RUN_DIR  scene_tag=$TAG  ts_utc=$TS  host=$(hostname)"
+  echo "[record] side=$SIDE  follower=$FOLLOWER_PORT  leader=$LEADER_PORT"
+  echo "[record] cameras=$CAMERAS"
+  echo "[record] wrist=$WRIST  repo_id=$REPO_ID  episodes=$NUM_EPISODES  ${CAMERA_W}x${CAMERA_H}@${FPS}fps"
+  echo "[record] gravity_comp=$GRAVITY_COMP scale=$GRAVITY_SCALE side=$SIDE urdf=$GRAVITY_URDF"
+  echo "[record] episode_advance=$EPISODE_ADVANCE"
+  if [ "$EPISODE_ADVANCE" = "manual" ]; then
+    echo "[record]   エピソード終了後: a = 両腕を開始姿勢へ戻す -> 環境を整える -> 右矢印 = 次を開始"
+    echo "[record]   左矢印 = 直前のテイクを破棄して録り直す / esc = 収集終了"
+    echo "[record]   a を押す前に、腕と机から手を引くこと(3.5秒ほど両腕が自律動作する)"
+    if [ -n "$START_POSE_TOL_DEG" ]; then
+      echo "[record]   戻し後の検算: ${START_POSE_TOL_DEG}deg  log=$START_POSE_LOG"
+    else
+      echo "[record]   戻し後の検算: 無効(戻し操作は行うが成否を確認しない)"
+    fi
   else
-    echo "[record]   戻し後の検算: 無効(戻し操作は行うが成否を確認しない)"
+    echo "[record]   時間駆動: reset_time_s=${RESET_TIME_S}s の窓が過ぎたら自動で次へ"
+    if [ -n "$START_POSE_TOL_DEG" ]; then
+      echo "[record]   開始姿勢ゲート: tolerance=${START_POSE_TOL_DEG}deg  max_wait=${START_POSE_MAX_WAIT_S}s  log=$START_POSE_LOG"
+      echo "[record]   ゲート待機中のキー: a = 腕を戻す / 右矢印 = そのまま録る / esc = 停止"
+    else
+      echo "[record]   開始姿勢ゲート: 無効(従来の手動リセットのみ)"
+    fi
   fi
-else
-  echo "[record]   時間駆動: reset_time_s=${RESET_TIME_S}s の窓が過ぎたら自動で次へ"
-  if [ -n "$START_POSE_TOL_DEG" ]; then
-    echo "[record]   開始姿勢ゲート: tolerance=${START_POSE_TOL_DEG}deg  max_wait=${START_POSE_MAX_WAIT_S}s  log=$START_POSE_LOG"
-    echo "[record]   ゲート待機中のキー: a = 腕を戻す / 右矢印 = そのまま録る / esc = 停止"
-  else
-    echo "[record]   開始姿勢ゲート: 無効(従来の手動リセットのみ)"
-  fi
-fi
+} 2>&1 | tee "$CONSOLE_LOG"
 
+# set -e を一時的に外す: pipefail 下で lerobot が非0終了すると、ここで即座に
+# 抜けて終了メッセージも終了コードの伝播も走らなくなる。PIPESTATUS[0] で
+# lerobot 自身の終了コードを取り(tee の 0 で隠さない)、最後に伝播させる。
+set +e
 lerobot-record \
   --robot.type=openarm_follower \
   --robot.port="$FOLLOWER_PORT" \
@@ -181,4 +223,16 @@ lerobot-record \
   --dataset.reset_time_s="$RESET_TIME_S" \
   --dataset.push_to_hub=false \
   "${POSE_ARGS[@]}" \
-  "${GATE_ARGS[@]}"
+  "${GATE_ARGS[@]}" 2>&1 | tee -a "$CONSOLE_LOG"
+RC=${PIPESTATUS[0]}
+set -e
+
+{
+  echo "[record] lerobot-record exit=$RC"
+  echo "[record] 記録: $RUN_DIR"
+  ls -1 "$RUN_DIR" | sed 's/^/[record]   /'
+  echo "[record] 次: 軽量メタを Vault へ回収する(pull_run.sh・未実装)。"
+  echo "[record]     manifest.json / command.sh / ledger.csv / notes.md も未実装(バックログ2・4)。"
+} 2>&1 | tee -a "$CONSOLE_LOG"
+
+exit "$RC"
