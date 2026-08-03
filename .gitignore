@@ -5,3 +5,7 @@ outputs/
 __pycache__/
 *.pyc
 .venv/
+
+# ローカル手動バックアップ（コミットしない）
+*.bak
+*.bak-*
