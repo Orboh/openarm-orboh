@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
 # OpenArm 学習済みポリシーの実機推論 (lerobot-rollout)。停止は Ctrl-C / ESC。
 #
+# ---- 推論ランナーは2本ある。取り違えないこと --------------------------------
+#   このファイル scripts/run_rollout_lerobot.sh
+#     → lerobot 標準の `lerobot-rollout` を起動。ACT 等の lerobot ポリシー用。
+#       開始姿勢固定を配線済み(initial_pose_path・reset_to_initial_position)。
+#       run_dir/tee の記録機構は無い。実機未実走。
+#   scripts/g4/run_rollout.sh
+#     → 自前の `g4/eval_openarm.py` を起動。GR00T(外部 PolicyServer)用。
+#       run_dir + tee の記録機構を持ち、実機で実走済み。
+#   2026-08-03 に同名 run_rollout.sh 2本の状態を解消してこの名前にした。
+# -----------------------------------------------------------------------------
+#
 # 開始姿勢の固定(収集時と同一化):
 #   - robot.connect() 時に align_on_connect(既定 true)が発火し、キャプチャ済み ready 姿勢
 #     (config/initial_pose_<side>.yaml、record と同じファイル)へソフト整列する。
@@ -20,11 +31,11 @@
 # 学習時と入力カメラ集合が一致しないとポリシーは動かない(visual feature mismatch で起動失敗)。
 #
 # 使い方:
-#   POLICY_PATH=outputs/train/act_okra/checkpoints/last/pretrained_model bash scripts/run_rollout.sh
-#   SIDE=right POLICY_PATH=... bash scripts/run_rollout.sh
-#   SIDE=bimanual POLICY_PATH=... bash scripts/run_rollout.sh
-#   STRATEGY=base POLICY_PATH=... bash scripts/run_rollout.sh      # 記録なし連続実行
-#   TELEOP=true POLICY_PATH=... bash scripts/run_rollout.sh        # リセット手動運転用に leader 接続
+#   POLICY_PATH=outputs/train/act_okra/checkpoints/last/pretrained_model bash scripts/run_rollout_lerobot.sh
+#   SIDE=right POLICY_PATH=... bash scripts/run_rollout_lerobot.sh
+#   SIDE=bimanual POLICY_PATH=... bash scripts/run_rollout_lerobot.sh
+#   STRATEGY=base POLICY_PATH=... bash scripts/run_rollout_lerobot.sh      # 記録なし連続実行
+#   TELEOP=true POLICY_PATH=... bash scripts/run_rollout_lerobot.sh        # リセット手動運転用に leader 接続
 set -euo pipefail
 
 SIDE="${SIDE:-left}"                       # left | right | bimanual

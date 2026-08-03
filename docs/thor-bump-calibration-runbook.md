@@ -165,7 +165,7 @@ per-unit 確定値の記録欄(較正のたび更新):
 
 ## 9. inference 側 E2E(rollout の開始固定)
 
-1. `POLICY_PATH=<学習済み> NUM_EPISODES=2 EPISODE_TIME_S=5 bash scripts/run_rollout.sh`
+1. `POLICY_PATH=<学習済み> NUM_EPISODES=2 EPISODE_TIME_S=5 bash scripts/run_rollout_lerobot.sh`
 2. 確認:
    - connect 時に follower が ready 姿勢へ整列 → その姿勢が initial_position として
      ログに記録される(`Captured initial robot position`)

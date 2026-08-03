@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 # GR00T×OpenArm ロールアウトの記録ラッパー（Thor 上で実行）。
 #
+# ---- 推論ランナーは2本ある。取り違えないこと --------------------------------
+#   このファイル scripts/g4/run_rollout.sh
+#     → 自前の g4/eval_openarm.py を起動。GR00T(外部 PolicyServer)用。実走済み。
+#   scripts/run_rollout_lerobot.sh
+#     → lerobot 標準の `lerobot-rollout` を起動。ACT 等の lerobot ポリシー用。
+# -----------------------------------------------------------------------------
+#
 # 1試行 = 1ディレクトリ（~/rollouts/<UTC>-<tag>/）に、条件・コマンド・環境・端末出力・
 # 生データを集約する。記録がバラける（bash_history / g3-logs / g4-artifacts / tmp）問題と、
 # 端末出力が一切ファイル化されない問題への恒久対処。
@@ -46,6 +53,33 @@ if [[ "$_has_obs_flag" == false ]]; then
   exit 2
 fi
 
+# --- 開始姿勢 YAML の自動配線（収集時と同じ構えから始めるため）---------------
+# eval_openarm.py は draccus で RobotConfig を組むので --robot.initial_pose_path を
+# そのまま受ける。接続時整列そのものは connect() 内の align_on_connect(既定 true)で
+# 既に効いているが、**キャプチャ済み ready 姿勢の YAML は渡さないと使われない**。
+# 渡さないと公式既定(肘 π/5=36°)に落ち、収集側 record_pick_place_openarm.sh が
+# YAML を渡していた場合に**推論だけ別の構えから始まる**。YAML が無い今は両方とも
+# 公式既定で一致しているので実害は出ていないが、キャプチャした瞬間に静かにずれる。
+# --log_obs_every_step のような明示強制にはしない: 渡すか渡さないかにトレードオフが
+# 無く、あるなら常に渡すのが正しいため(自動付与し、付けた事実を console.log に残す)。
+_side=""; _has_pose=false
+for _a in "$@"; do
+  case "$_a" in
+    --robot.side=*)              _side="${_a#*=}" ;;
+    --robot.initial_pose_path=*) _has_pose=true ;;
+  esac
+done
+POSE_ARGS=()
+if [[ "$_has_pose" == false && -n "$_side" ]]; then
+  _pose="$HOME/projects/openarm-orboh/config/initial_pose_${_side}.yaml"
+  if [[ -f "$_pose" ]]; then
+    POSE_ARGS+=(--robot.initial_pose_path="$_pose")
+    echo "[rollout] 開始姿勢 YAML を自動付与: $_pose"
+  else
+    echo "[rollout] 開始姿勢 YAML なし → 公式既定(肘36°)で整列。収集側も同条件であること: $_pose"
+  fi
+fi
+
 TS=$(date -u +%Y%m%dT%H%M%SZ)
 RUN_DIR="$HOME/rollouts/${TS}-${TAG}"
 mkdir -p "$RUN_DIR"
@@ -57,6 +91,8 @@ mkdir -p "$RUN_DIR"
   echo "# 再実行時は --run_dir を外すか別名にすること（上書き防止）"
   printf '%q ' "$VENV" "$EVAL"
   printf '%q ' "$@"
+  # 自動付与した開始姿勢も残す。ここに書かないと再実行時に構えが変わる
+  [ ${#POSE_ARGS[@]} -gt 0 ] && printf '%q ' "${POSE_ARGS[@]}"
   printf '%q\n' "--run_dir=$RUN_DIR"
 } > "$RUN_DIR/command.sh"
 chmod +x "$RUN_DIR/command.sh"
@@ -102,7 +138,7 @@ echo "== eval_openarm を起動（console.log に tee）=="
 
 # --- 本体を tee で呼ぶ。eval_openarm の exit code を保持する ---
 set +e
-"$VENV" "$EVAL" "$@" --run_dir="$RUN_DIR" 2>&1 | tee "$RUN_DIR/console.log"
+"$VENV" "$EVAL" "$@" ${POSE_ARGS[@]+"${POSE_ARGS[@]}"} --run_dir="$RUN_DIR" 2>&1 | tee "$RUN_DIR/console.log"
 rc=${PIPESTATUS[0]}
 set -e
 echo "== eval_openarm 終了 rc=$rc ==" | tee -a "$RUN_DIR/console.log" >/dev/null

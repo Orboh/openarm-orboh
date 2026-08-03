@@ -87,7 +87,7 @@ DISPLAY_DATA="${DISPLAY_DATA:-true}"        # set false for headless dry-run
 #   - エピソード間: lerobot-record のリセットは reset_time_s の手動ウィンドウ
 #     (teleop 運転)。leader を手でこの ready 姿勢に戻してから次エピソードを
 #     開始する。戻し忘れを防ぐため下の開始姿勢ゲートが判定し、許容外なら
-#     録り始めない(推論側 run_rollout.sh は reset_to_initial_position で
+#     録り始めない(推論側 run_rollout_lerobot.sh は reset_to_initial_position で
 #     完全自動復帰。record は teleop 運転中で人の手が leader に載るため、
 #     無断で腕を動かさずゲート+キー押しアラインにしてある)。
 #   - 収集セッションを跨ぐ場合も同じ ready YAML を使い続ける(較正=恒久ゼロ +
