@@ -273,6 +273,11 @@ def write_notes(run_dir: Path, manifest: dict, rows: list[dict], advance: str | 
         f"created_by: Claude ({operator})",
         f"session: {yaml_val(identity.get('session_id'))}",
         f"started_utc: {yaml_val(identity.get('started_utc'))}",
+        # ローカル時刻と時刻だけの整数を dataview に出す。昼/夜はシーンプロファイルで
+        # 統制していない流動的な条件なので、**セッション層で突合できるようにする**のが
+        # ここの役目（`local_hour` で「昼のセッションだけ」を機械的に絞れる）。
+        f"started_local: {yaml_val(identity.get('started_local'))}",
+        f"local_hour: {yaml_val(identity.get('local_hour'))}",
         f"operator: {yaml_val(operator)}",
         f"judge: {yaml_val(people.get('judge'))}",
         f"scene: {yaml_val(scene.get('name'))}",
@@ -283,6 +288,11 @@ def write_notes(run_dir: Path, manifest: dict, rows: list[dict], advance: str | 
         f"repo_id: {yaml_val(artifacts.get('repo_id_stamped') or artifacts.get('repo_id_requested'))}",
         f"episodes: {yaml_val(artifacts.get('episodes_recorded') if artifacts.get('episodes_recorded') is not None else len(rows))}",
         f"episode_advance: {yaml_val(advance)}",
+        # ★セッションごとに変わる条件（シーンプロファイルでは統制していないもの）。
+        # 静的な物理条件はシーン側が持つが、**セッションごとに動く状態はここが正**。
+        # 空のまま残っていれば「記録し忘れ」がひと目で分かる。
+        "lighting_observed: null   # 昼 / 夜 / その他（started_local から自分で判断して書く）",
+        "object_condition: null    # このセッション開始時のボトルの状態（凹みの進み具合）",
         # 人が台帳を埋め終えたら true にする。dataview で未完成セッションを拾う鍵。
         "ledger_complete: false",
         # 統合したら統合先データセットを書く(マージ順は manifest 側)。

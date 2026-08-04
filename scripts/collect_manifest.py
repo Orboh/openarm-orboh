@@ -49,6 +49,25 @@ def _utc(ts: float) -> str:
     return datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _local_time(started_utc: str) -> dict:
+    """UTC の開始時刻からローカル時刻を導出する。
+
+    shell が渡した UTC から**導出**するので、2つの値が食い違うことがない
+    （それぞれ別に time を呼ぶと数秒ずれ、日付境界では日がずれる）。
+    """
+    try:
+        dt = datetime.strptime(started_utc, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return {"started_local": None, "tz": None, "local_hour": None}
+    local = dt.astimezone()
+    return {
+        "started_local": local.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "tz": local.tzname(),
+        # 昼夜の突合を機械でやるとき、文字列を再パースせずに済むように整数でも置く。
+        "local_hour": local.hour,
+    }
+
+
 def _sha256(path: Path) -> str | None:
     try:
         return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -215,6 +234,13 @@ def cmd_init(args: argparse.Namespace) -> int:
             "session_id": args.session_id,
             "run_dir": str(run_dir),
             "started_utc": args.started_utc,
+            # ローカル時刻も併記する。UTC は「別マシンで読み・別日と順序を比較する」ために
+            # 必要だが、**昼か夜かは UTC を見ても分からない**(JST なら +9 が要る)。
+            # 昼/夜はシーンプロファイルでは統制していない流動的な条件なので、後から
+            # 「あのセッションは昼だったか」を答えられるのはこの値だけになる。
+            # 分類(昼/夜)は焼き込まない——閾値は恣意的で季節でも動くので、**分類ではなく
+            # 分類できる素の値**を残す。
+            **_local_time(args.started_utc),
             "host": platform.node(),
         },
         "people": {
@@ -255,9 +281,15 @@ def cmd_init(args: argparse.Namespace) -> int:
             "exit_code": None,
         },
         # 人があとで埋める欄。空のまま残っていること自体が回収漏れの印になる。
+        # 後半2つは**セッションごとに変わる条件**で、静的なシーンプロファイルには
+        # 置けないもの（置くと「一度宣言して sha で参照する」モデルが壊れる）。
         "human_fields": {
             "scatter_actual": None,
             "anomalies": None,
+            # 昼/夜。identity.started_local から人が判断して書く（分類は焼き込まない）。
+            "lighting_observed": None,
+            # このセッション開始時のボトルの状態。凹みは収集を通じて進む。
+            "object_condition": None,
         },
         "pointers": {
             "console_log": "console.log",
@@ -337,6 +369,51 @@ def _episode_count(dataset_root: Path) -> int | None:
         return json.loads(info.read_text(encoding="utf-8")).get("total_episodes")
     except Exception:
         return None
+
+
+def cmd_check_drift(args: argparse.Namespace) -> int:
+    """同じシーン名で前に録った run と sha が一致するかを見る。
+
+    「1本録ったらシーンを書き換えず新しいファイルを作る」は規約として書いてあるが、
+    **機構が無いと守られたか誰も確認できない**。50ep は複数セッション・複数日に
+    分かれるので、途中で実測値を1つ直すと前後で sha が割れ、各 run の記録は正しい
+    まま「50ep が実は2条件に割れていた」と学習の分析時に判明する——そこまで行くと
+    もう録り直しでしか直せない。
+
+    出力（shell がそのまま判定に使う）:
+      一致・前例なし・判定不能 → 何も出さず 0
+      食い違い               → "DRIFT <前の sha 先頭12> <今の sha 先頭12> <前の run 名>"
+    """
+    scene_path = Path(args.scene_path).expanduser()
+    if not scene_path.is_file():
+        return 0
+    current = _sha256(scene_path)
+    if not current:
+        return 0
+    name = scene_path.stem
+
+    root = Path(args.collections_dir).expanduser()
+    if not root.is_dir():
+        return 0
+    # 最新の run と比べる。全 run と比べないのは、既に割れている履歴があると
+    # 毎回止まって進めなくなるため（直近と揃っていれば運用としては足りる）。
+    newest = None
+    for manifest_path in sorted(root.glob("*/manifest.json")):
+        try:
+            m = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        scene = m.get("scene") or {}
+        if scene.get("name") != name or not scene.get("sha256"):
+            continue
+        started = (m.get("identity") or {}).get("started_utc") or ""
+        if newest is None or started >= newest[0]:
+            newest = (started, scene["sha256"], manifest_path.parent.name)
+    if newest is None:
+        return 0
+    if newest[1] != current:
+        print(f"DRIFT {newest[1][:12]} {current[:12]} {newest[2]}")
+    return 0
 
 
 def cmd_check_scene(args: argparse.Namespace) -> int:
@@ -441,6 +518,11 @@ def main(argv: list[str] | None = None) -> int:
     chk = sub.add_parser("check-scene", help="シーンプロファイルの TODO 件数を出す")
     chk.add_argument("--scene-path", required=True)
     chk.set_defaults(func=cmd_check_scene)
+
+    drift = sub.add_parser("check-drift", help="同じシーン名の前 run と sha が一致するか見る")
+    drift.add_argument("--scene-path", required=True)
+    drift.add_argument("--collections-dir", required=True)
+    drift.set_defaults(func=cmd_check_drift)
 
     args = parser.parse_args(argv)
     return args.func(args)

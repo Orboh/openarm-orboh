@@ -164,6 +164,29 @@ if [ -n "$SCENE_PATH" ]; then
     fi
     echo "[record] 警告: TODO $TODO_N 件のシーンで録る(ALLOW_TODO_SCENE=true)。条件は復元できない。" >&2
   fi
+
+  # 同じシーン名で前に録った run と sha が食い違っていたら止める。
+  # 「1本録ったらシーンを書き換えず新ファイルを作る」は規約として書いてあるが、
+  # 機構が無いと守られたか誰も確認できない。50ep は複数セッション・複数日に分かれる
+  # ので、途中で実測値を1つ直すと前後で sha が割れ、**各 run の記録は正しいまま
+  # 「50ep が実は2条件に割れていた」と学習の分析時に判明する**。そこまで行くと
+  # 録り直しでしか直せないので、起動時に弾く。
+  DRIFT="$("$PYTHON_BIN" "$MANIFEST_TOOL" check-drift --scene-path "$SCENE_PATH" \
+            --collections-dir "$(dirname "$RUN_DIR")" 2>/dev/null || echo "")"
+  if [ -n "$DRIFT" ]; then
+    set -- $DRIFT
+    if [ "${ALLOW_SCENE_DRIFT:-false}" != "true" ]; then
+      echo "[record] シーン '$SCENE' が前回の収録時と変わっている（sha が割れた）" >&2
+      echo "[record]   前回 $2 （run: $4）" >&2
+      echo "[record]   今回 $3" >&2
+      echo "[record] このまま録ると 50ep が2つの条件に割れ、あとから直せない。" >&2
+      echo "[record] 物理配置を変えたなら**新しいシーンファイル**を作って SCENE を変える。" >&2
+      echo "[record] 変えたつもりが無いなら git diff で何が動いたか確認する。" >&2
+      echo "[record] 承知で続けるなら ALLOW_SCENE_DRIFT=true" >&2
+      exit 1
+    fi
+    echo "[record] 警告: シーン sha が前回と違う（$2 → $3・ALLOW_SCENE_DRIFT=true）" >&2
+  fi
 fi
 
 # ---- run_dir: 1収集セッション = 1ディレクトリ --------------------------------
