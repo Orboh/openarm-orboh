@@ -104,6 +104,10 @@ def load_start_pose_rows(run_dir: Path) -> dict[int, list[dict]]:
             except json.JSONDecodeError:
                 warn(f"{path.name}:{lineno} が JSON として読めない。飛ばす。")
                 continue
+            # 先頭行は正準開始姿勢の宣言(逸脱がどこから測られたか)で、
+            # エピソードの行ではない。台帳には出さず読み飛ばす。
+            if entry.get("type") == "start_pose_reference":
+                continue
             ep = entry.get("episode_index")
             if not isinstance(ep, int):
                 continue
