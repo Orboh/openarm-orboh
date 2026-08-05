@@ -152,6 +152,23 @@ def _calibration_entries(calib_root: Path | None, side: str) -> list[dict]:
     return entries
 
 
+def _initial_pose_block(pose_path: Path | None) -> dict:
+    """teleop 起動時に整列先として使う開始姿勢 YAML の sha256 と mtime。
+
+    このファイルは git 未管理のままだと撮り直しを検出できない——シーン
+    プロファイルと同じ穴（撮り直すと50epが2条件に割れても、各 run 自体は
+    正しく記録されたまま学習の分析時まで発覚しない）。sha を manifest に
+    残すことで check-pose-drift が同じ仕組みで検出できるようにする。
+    """
+    block = {"path": None, "sha256": None, "mtime_utc": None}
+    if pose_path is None or not pose_path.is_file():
+        return block
+    block["path"] = str(pose_path)
+    block["sha256"] = _sha256(pose_path)
+    block["mtime_utc"] = _utc(pose_path.stat().st_mtime)
+    return block
+
+
 def _scene_block(scene_name: str | None, scene_path: Path | None) -> dict:
     """シーンプロファイルの名前と sha、そして未確定(TODO)の数。
 
@@ -224,6 +241,9 @@ def cmd_init(args: argparse.Namespace) -> int:
     scene_path = Path(args.scene_path) if args.scene_path else None
     scene = _scene_block(args.scene, scene_path)
 
+    pose_path = Path(args.initial_pose_path) if args.initial_pose_path else None
+    initial_pose = _initial_pose_block(pose_path)
+
     cameras = {"chest": args.cam_serial}
     if args.wrist_serial:
         cameras[f"wrist_{args.side}"] = args.wrist_serial
@@ -250,6 +270,7 @@ def cmd_init(args: argparse.Namespace) -> int:
             "judge": args.judge or None,
         },
         "scene": scene,
+        "initial_pose": initial_pose,
         "code": {
             "openarm_orboh": _repo_info(Path(args.repo_root) if args.repo_root else None),
             "lerobot": _repo_info(lerobot_root),
@@ -328,6 +349,12 @@ def cmd_init(args: argparse.Namespace) -> int:
                 "(恒久零が起動していない可能性)",
                 file=sys.stderr,
             )
+    if args.initial_pose_path and initial_pose["sha256"] is None:
+        print(
+            f"[manifest] 警告: 開始姿勢ファイルが無い: {args.initial_pose_path}"
+            "(公式既定の開始姿勢にフォールバックしている)",
+            file=sys.stderr,
+        )
     return 0
 
 
@@ -409,6 +436,44 @@ def cmd_check_drift(args: argparse.Namespace) -> int:
         started = (m.get("identity") or {}).get("started_utc") or ""
         if newest is None or started >= newest[0]:
             newest = (started, scene["sha256"], manifest_path.parent.name)
+    if newest is None:
+        return 0
+    if newest[1] != current:
+        print(f"DRIFT {newest[1][:12]} {current[:12]} {newest[2]}")
+    return 0
+
+
+def cmd_check_pose_drift(args: argparse.Namespace) -> int:
+    """同じ開始姿勢ファイルで前に録った run と sha が一致するかを見る。
+
+    cmd_check_drift と同じ理由・同じ契約（DRIFT 出力の書式も揃える）。開始姿勢
+    YAML は較正と違い git 未管理で撮り直しの検出手段が無かったため、シーン
+    プロファイルに倣ってここで機械照合できるようにする。
+    """
+    pose_path = Path(args.initial_pose_path).expanduser()
+    if not pose_path.is_file():
+        return 0
+    current = _sha256(pose_path)
+    if not current:
+        return 0
+    name = pose_path.stem
+
+    root = Path(args.collections_dir).expanduser()
+    if not root.is_dir():
+        return 0
+    newest = None
+    for manifest_path in sorted(root.glob("*/manifest.json")):
+        try:
+            m = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        pose = m.get("initial_pose") or {}
+        pose_path_recorded = pose.get("path")
+        if not pose_path_recorded or Path(pose_path_recorded).stem != name or not pose.get("sha256"):
+            continue
+        started = (m.get("identity") or {}).get("started_utc") or ""
+        if newest is None or started >= newest[0]:
+            newest = (started, pose["sha256"], manifest_path.parent.name)
     if newest is None:
         return 0
     if newest[1] != current:
@@ -500,6 +565,7 @@ def main(argv: list[str] | None = None) -> int:
     init.add_argument("--judge", default="")
     init.add_argument("--scene", default="")
     init.add_argument("--scene-path", default="")
+    init.add_argument("--initial-pose-path", default="")
     init.add_argument("--side", required=True)
     init.add_argument("--cam-serial", required=True)
     init.add_argument("--wrist-serial", default="")
@@ -523,6 +589,11 @@ def main(argv: list[str] | None = None) -> int:
     drift.add_argument("--scene-path", required=True)
     drift.add_argument("--collections-dir", required=True)
     drift.set_defaults(func=cmd_check_drift)
+
+    pose_drift = sub.add_parser("check-pose-drift", help="同じ開始姿勢ファイルの前 run と sha が一致するか見る")
+    pose_drift.add_argument("--initial-pose-path", required=True)
+    pose_drift.add_argument("--collections-dir", required=True)
+    pose_drift.set_defaults(func=cmd_check_pose_drift)
 
     args = parser.parse_args(argv)
     return args.func(args)

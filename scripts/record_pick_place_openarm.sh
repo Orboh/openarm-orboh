@@ -62,9 +62,11 @@ CAMERAS="$CAMERAS }"
 # ---- Leader gravity compensation (light leader for comfortable collection) ---
 # Inject G(q) feed-forward on the leader (joints 1-7; gripper excluded) so it can
 # be moved by hand. Independent of FPS. Requires Thor's lerobot venv on the
-# feat/gravity-comp branch with pinocchio installed. scale 1.2 validated 2026-06-17.
+# feat/gravity-comp branch with pinocchio installed. scale 1.2 validated 2026-06-17;
+# fixed at 1.0 for the 50-episode collection (2026-08-05 Kento decision, tested
+# clean across the day's sessions) so all 5 sessions share one value.
 GRAVITY_COMP="${GRAVITY_COMP:-true}"
-GRAVITY_SCALE="${GRAVITY_SCALE:-1.2}"
+GRAVITY_SCALE="${GRAVITY_SCALE:-1.0}"
 GRAVITY_URDF="${GRAVITY_URDF:-$HOME/openarm-orboh/urdf/openarm_v10_bimanual.urdf}"
 
 # ---- Dataset tunables --------------------------------------------------------
@@ -100,6 +102,19 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 POSE="$REPO/config/initial_pose_${SIDE}.yaml"
 POSE_ARGS=()
 [ -f "$POSE" ] && POSE_ARGS+=(--robot.initial_pose_path="$POSE" --teleop.initial_pose_path="$POSE")
+
+# run_dir の文字列だけ先に決める(ディレクトリはまだ作らない)。シーン/開始姿勢の
+# drift チェックが --collections-dir に $RUN_DIR の親を使うため、値が要る。
+# ここで決めるのは値のみ: 実際の存在チェックと mkdir は後方の run_dir セクション
+# (第1引数=シーンタグの検証がまだ済んでいないため、通常の実行順はそちらが正)。
+TAG="${1:-untagged}"
+if ! printf '%s' "$TAG" | grep -qE '^[A-Za-z0-9-]+$'; then
+  echo "[record] scene-tag は英数ハイフンのみ: '$TAG'" >&2
+  echo "[record] 例: bash scripts/record_pick_place_openarm.sh bottle-desk50-bright" >&2
+  exit 1
+fi
+TS="$(date -u +%Y%m%dT%H%M%SZ)"
+RUN_DIR="${RUN_DIR:-$HOME/collections/${TS}-${TAG}}"
 
 # ---- 人とシーン(人が入れる3つのうち2つ) --------------------------------------
 # OPERATOR を必須にするのは、操作者が違うとデモの癖が変わり、少数データの模倣
@@ -189,23 +204,35 @@ if [ -n "$SCENE_PATH" ]; then
   fi
 fi
 
+# 開始姿勢 YAML も同じ穴を持つ(シーンと違い名前は変えず内容を撮り直しうる)。
+# 撮り直すと50epが2条件に割れても各runの記録自体は正しいまま学習の分析時まで
+# 発覚しない。ファイルが無ければ公式既定(肘36°)にフォールバックするだけなので
+# チェックしない(較正の有無と同じ扱い)。
+if [ -f "$POSE" ]; then
+  POSE_DRIFT="$("$PYTHON_BIN" "$MANIFEST_TOOL" check-pose-drift --initial-pose-path "$POSE" \
+            --collections-dir "$(dirname "$RUN_DIR")" 2>/dev/null || echo "")"
+  if [ -n "$POSE_DRIFT" ]; then
+    set -- $POSE_DRIFT
+    if [ "${ALLOW_POSE_DRIFT:-false}" != "true" ]; then
+      echo "[record] 開始姿勢 '$POSE' が前回の収録時と変わっている（sha が割れた）" >&2
+      echo "[record]   前回 $2 （run: $4）" >&2
+      echo "[record]   今回 $3" >&2
+      echo "[record] このまま録ると 50ep が2つの条件に割れ、あとから直せない。" >&2
+      echo "[record] 撮り直したなら承知で ALLOW_POSE_DRIFT=true。誤って上書きしたなら復元する。" >&2
+      exit 1
+    fi
+    echo "[record] 警告: 開始姿勢 sha が前回と違う（$2 → $3・ALLOW_POSE_DRIFT=true）" >&2
+  fi
+fi
+
 # ---- run_dir: 1収集セッション = 1ディレクトリ --------------------------------
-# 第1引数がシーンタグ(机の配置や対象物の識別。英数ハイフンのみ)。
-# 記録の外付けであり収集ループには触らない。推論側 scripts/g4/run_rollout.sh の
-# 同じ設計を移植したもの。
+# TAG/TS/RUN_DIR の値はすでに決めてある(上の POSE ブロック直後。drift チェックが
+# 必要とするため)。ここでは実際の存在チェックと作成だけを行う。
 #
 # なぜ tee が要るか: lerobot は起動時に設定の全文をダンプするが、それは stdout で
 # なく stderr に出る。`2>&1` を付けないと console.log に1行も入らない。さらに
 # パイプ越しだと Python が出力をブロックバッファするので PYTHONUNBUFFERED=1 が
 # 無いと途中まで書かれず、異常終了時に肝心の直前ログが失われる。
-TAG="${1:-untagged}"
-if ! printf '%s' "$TAG" | grep -qE '^[A-Za-z0-9-]+$'; then
-  echo "[record] scene-tag は英数ハイフンのみ: '$TAG'" >&2
-  echo "[record] 例: bash scripts/record_pick_place_openarm.sh bottle-desk50-bright" >&2
-  exit 1
-fi
-TS="$(date -u +%Y%m%dT%H%M%SZ)"
-RUN_DIR="${RUN_DIR:-$HOME/collections/${TS}-${TAG}}"
 if [ -e "$RUN_DIR" ]; then
   echo "[record] run_dir が既に存在する(上書きしない): $RUN_DIR" >&2
   exit 1
@@ -306,6 +333,7 @@ MANIFEST_ARGS=(
   --judge "$JUDGE"
   --scene "$SCENE"
   --scene-path "$SCENE_PATH"
+  --initial-pose-path "$POSE"
   --side "$SIDE"
   --cam-serial "$CAM_SERIAL"
   --fps "$FPS"
