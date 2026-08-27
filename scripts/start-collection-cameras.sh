@@ -123,10 +123,16 @@ sleep 2
 # Thor の gst 1.24 は「1 プロセス内の複数 v4l2src + compositor」で SIGSEGV する
 # (2026-08-27 切り分け: 素流し・変換・合成の各 gst は単体では全部通る)。
 # 出力は yuv420p (=I420)。sender は入力を内部で I420 化するのでそのまま渡せる。
+# 低遅延フラグ必須: ffmpeg は2本のライブ入力をタイムスタンプ同期 (framesync) で
+# 待ち合わせるため、既定バッファのままだと2カメラの時計ズレぶん行列が育ち
+# ラグが蓄積する。wallclock 刻印 + nobuffer で待ちを殺す。
 ffmpeg -hide_banner -loglevel error \
+  -fflags nobuffer -flags low_delay -use_wallclock_as_timestamps 1 \
   -f v4l2 -input_format yuyv422 -video_size ${W}x${H} -framerate $FPS -i /dev/video21 \
+  -fflags nobuffer -flags low_delay -use_wallclock_as_timestamps 1 \
   -f v4l2 -input_format yuyv422 -video_size ${W}x${H} -framerate $FPS -i /dev/video22 \
-  -filter_complex "[1:v]scale=${PIP_W}:${PIP_H}[pip];[0:v][pip]overlay=${PIP_X}:${PIP_Y},format=yuv420p" \
+  -filter_complex "[1:v]scale=${PIP_W}:${PIP_H}[pip];[0:v][pip]overlay=${PIP_X}:${PIP_Y}:eof_action=pass,format=yuv420p" \
+  -fps_mode passthrough \
   -f v4l2 /dev/video20 &
 PIDS+=($!)
 

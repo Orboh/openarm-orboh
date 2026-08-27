@@ -198,12 +198,33 @@ fi
 
 # manifest を書く python。lerobot の定数(HF_LEROBOT_HOME・較正ルート)は lerobot
 # 自身から読ませたいので、lerobot-record と同じインタプリタを使う(shebang から取る)。
+# lerobot-record は PATH に無ければ lerobot venv のものを使う (Thor は venv 運用。
+# 兄弟スクリプト run_teleop_remote_*.sh と同じ流儀)。
+LEROBOT_RECORD="${LEROBOT_RECORD:-}"
+if [ -z "$LEROBOT_RECORD" ]; then
+  if command -v lerobot-record >/dev/null 2>&1; then
+    LEROBOT_RECORD=lerobot-record
+  else
+    LEROBOT_RECORD="$HOME/projects/lerobot/.venv/bin/lerobot-record"
+  fi
+fi
+if ! command -v "$LEROBOT_RECORD" >/dev/null 2>&1 && [ ! -x "$LEROBOT_RECORD" ]; then
+  echo "[record] NG: lerobot-record が見つからない ($LEROBOT_RECORD)" >&2
+  exit 1
+fi
+# venv をフルパスで呼ぶ場合、rerun ビューア等の同梱バイナリを rr.spawn が PATH から
+# 探すため、venv の bin を PATH に足す (無いと display_data=true が起動時に落ちる)。
+case "$LEROBOT_RECORD" in
+  */bin/lerobot-record) export PATH="$(dirname "$LEROBOT_RECORD"):$PATH" ;;
+esac
+
 PYTHON_BIN="${PYTHON_BIN:-}"
 if [ -z "$PYTHON_BIN" ]; then
   LR_BIN="$(command -v lerobot-record || true)"
   if [ -n "$LR_BIN" ]; then
     PYTHON_BIN="$(head -1 "$LR_BIN" | sed -e 's/^#!//' -e 's/[[:space:]].*$//')"
   fi
+  if [ ! -x "${PYTHON_BIN:-}" ]; then PYTHON_BIN="$HOME/projects/lerobot/.venv/bin/python"; fi
   if [ ! -x "${PYTHON_BIN:-}" ]; then PYTHON_BIN=python3; fi
 fi
 MANIFEST_TOOL="$REPO/scripts/collect_manifest.py"
@@ -472,7 +493,7 @@ else
 fi
 
 set +e
-lerobot-record \
+"$LEROBOT_RECORD" \
   --robot.type=openarm_follower \
   --robot.port="$FOLLOWER_PORT" \
   --robot.side="$SIDE" \
