@@ -61,6 +61,9 @@ FPS="${FPS:-30}"                            # = dataset.fps AND teleop loop rate
 # いる映像そのもの」がデータセットの chest になる。SDK 直読 (既定) は sender と
 # 同一カメラで排他なので、PICO 併用収集では必ずこちらを使うこと。
 CHEST_V4L2="${CHEST_V4L2:-}"
+# WRIST_V4L2: 同上の wrist 版。PiP 分配 (start-collection-cameras.sh) は実カメラ
+# 2台とも V4L2 で占有するので、分配併用時は両方を仮想カメラ経由にする。
+WRIST_V4L2="${WRIST_V4L2:-}"
 
 # Build the cameras dict: chest always; append wrist_<SIDE> only when WRIST=true
 if [ -n "$CHEST_V4L2" ]; then
@@ -69,7 +72,11 @@ else
   CAMERAS="{ chest: {type: intelrealsense, serial_number_or_name: '$CAM_SERIAL', width: $CAMERA_W, height: $CAMERA_H, fps: $FPS}"
 fi
 if [ "$WRIST" = "true" ]; then
-  CAMERAS="$CAMERAS, wrist_${SIDE}: {type: intelrealsense, serial_number_or_name: '$WRIST_SERIAL', width: $CAMERA_W, height: $CAMERA_H, fps: $FPS}"
+  if [ -n "$WRIST_V4L2" ]; then
+    CAMERAS="$CAMERAS, wrist_${SIDE}: {type: opencv, index_or_path: '$WRIST_V4L2', width: $CAMERA_W, height: $CAMERA_H, fps: $FPS}"
+  else
+    CAMERAS="$CAMERAS, wrist_${SIDE}: {type: intelrealsense, serial_number_or_name: '$WRIST_SERIAL', width: $CAMERA_W, height: $CAMERA_H, fps: $FPS}"
+  fi
 fi
 CAMERAS="$CAMERAS }"
 
