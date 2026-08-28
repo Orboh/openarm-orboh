@@ -18,9 +18,15 @@
 set -euo pipefail
 
 W=640; H=480; FPS=30
-# PiP 小窓: 幅1/3 (偶数必須=I420)。右下に配置。
-PIP_W=214; PIP_H=160
-PIP_X=$((W - PIP_W)); PIP_Y=$((H - PIP_H))
+# PICO 向け合成キャンバスは 16:9 (1280x720)。4:3 のままだと PICO 側キャンバスに
+# 余白が出て、その領域が市松柄として符号化されてしまう (2026-08-28 実測・sender
+# 側 compositor の既定背景)。レイアウト: chest を左に 4:3 のまま (960x720)、
+# 右の余白カラム (320px) を wrist 専用パネル (320x240・上下中央) に転用する。
+# wrist が chest に重ならず、PICO への解像度も 720p ネイティブになる。
+OUT_W=1280; OUT_H=720
+CHEST_W=960; CHEST_H=720
+WRIST_W=320; WRIST_H=240
+WRIST_X=$CHEST_W; WRIST_Y=$(( (OUT_H - WRIST_H) / 2 ))
 
 # product 文字列でカメラ個体を特定し、その個体の YUYV(=RGB) ノードを返す。
 # 仮想カメラ (v4l2loopback) は product が無いので自然に除外される。
@@ -83,7 +89,7 @@ SEED_ERR=/tmp/cams-seed-err.log
 for _ in 1 2 3 4 5; do
   : > "$SEED_ERR"
   if gst-launch-1.0 -q videotestsrc num-buffers=1 \
-       ! video/x-raw,format=I420,width=$W,height=$H,framerate=$FPS/1 \
+       ! video/x-raw,format=I420,width=$OUT_W,height=$OUT_H,framerate=$FPS/1 \
        ! identity drop-allocation=true ! v4l2sink device=/dev/video20 sync=false >> "$SEED_ERR" 2>&1; then
     seed_ok=true; break
   fi
@@ -131,7 +137,7 @@ ffmpeg -hide_banner -loglevel error \
   -f v4l2 -input_format yuyv422 -video_size ${W}x${H} -framerate $FPS -i /dev/video21 \
   -fflags nobuffer -flags low_delay -use_wallclock_as_timestamps 1 \
   -f v4l2 -input_format yuyv422 -video_size ${W}x${H} -framerate $FPS -i /dev/video22 \
-  -filter_complex "[1:v]scale=${PIP_W}:${PIP_H}[pip];[0:v][pip]overlay=${PIP_X}:${PIP_Y}:eof_action=pass,format=yuv420p" \
+  -filter_complex "[0:v]scale=${CHEST_W}:${CHEST_H}[chest];[1:v]scale=${WRIST_W}:${WRIST_H}[wrist];[chest]pad=${OUT_W}:${OUT_H}:0:0:black[bg];[bg][wrist]overlay=${WRIST_X}:${WRIST_Y}:eof_action=pass,format=yuv420p" \
   -fps_mode passthrough \
   -f v4l2 /dev/video20 &
 PIDS+=($!)
@@ -145,4 +151,9 @@ for pid in "${PIDS[@]}"; do
 done
 echo "[cams] 分配稼働中 (pids ${PIDS[*]})。停止は Ctrl-C"
 echo "[cams] 次: sender は --device /dev/video20 / record は CHEST_V4L2=/dev/video21 WRIST_V4L2=/dev/video22"
-wait
+# どれか1本でも死んだら全体を止めて知らせる。従来の `wait`(全員待ち)だと、
+# 素流しがUSB瞬断等で静かに落ちても合成だけ生き残り、video20が空のまま
+# 「稼働中に見える半死」になる (2026-08-28 実発生・36分気づけなかった)。
+wait -n || true
+echo "[cams] NG: 分配プロセスのどれかが終了した。全体を停止する (再実行すれば復旧)" >&2
+exit 1
