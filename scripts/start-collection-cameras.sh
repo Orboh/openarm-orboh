@@ -37,7 +37,10 @@ CHEST_H=$(( CHEST_W * 3 / 4 )); [ "$CHEST_H" -gt "$OUT_H" ] && CHEST_H=$OUT_H
 CHEST_H=$(( CHEST_H / 2 * 2 )); CHEST_W=$(( CHEST_H * 4 / 3 / 2 * 2 ))
 CHEST_X=$(( (OUT_W - CHEST_W) / 2 ))
 CHEST_Y=$(( (OUT_H - CHEST_H) / 2 ))
-WRIST_W=288; WRIST_H=216   # 4:3 維持・chest 右下に内側 16px で重ねる
+# wrist 小窓 (4:3・chest 右下に内側 16px で重ねる)。chest への重なりを減らすため
+# 既定は 216x162 (chest の約5%。288x216 だと約9%)。見づらければ現場で上書き:
+#   WRIST_W=288 WRIST_H=216 bash start-collection-cameras.sh
+WRIST_W="${WRIST_W:-216}"; WRIST_H="${WRIST_H:-162}"
 WRIST_X=$(( CHEST_X + CHEST_W - WRIST_W - 16 ))
 WRIST_Y=$(( CHEST_Y + CHEST_H - WRIST_H - 16 ))
 
