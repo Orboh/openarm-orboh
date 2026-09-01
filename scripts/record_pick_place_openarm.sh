@@ -180,11 +180,15 @@ SCENE_PATH=""
 if [ -z "$SCENE" ]; then
   echo "[record] SCENE が未指定。物理条件が記録されず、あとから条件を復元できない。" >&2
   echo "[record] 利用可能なシーン:" >&2
+  # `_` 始まりは雛形・テスト用なので候補に出さない。
   if [ -d "$REPO/scenes" ]; then
-    ls -1 "$REPO/scenes" | sed 's/\.yaml$//; s/^/[record]   /' >&2
+    ls -1 "$REPO/scenes" | grep -v '^_' | sed 's/\.yaml$//; s/^/[record]   /' >&2
   else
     echo "[record]   (scenes/ が無い)" >&2
   fi
+  echo "[record] 新しい環境で録るなら、雛形をコピーして実測値を入れる:" >&2
+  echo "[record]   cp scenes/_TEMPLATE.yaml scenes/<name>.yaml && \$EDITOR scenes/<name>.yaml" >&2
+  echo "[record]   TODO を全部埋めるまでは起動できない(埋め忘れを防ぐため)" >&2
   echo "[record] 条件を残さない dry run なら SCENE=none" >&2
   exit 1
 fi
@@ -192,6 +196,11 @@ if [ "$SCENE" != "none" ]; then
   SCENE_PATH="$REPO/scenes/${SCENE}.yaml"
   if [ ! -f "$SCENE_PATH" ]; then
     echo "[record] シーンプロファイルが無い: $SCENE_PATH" >&2
+    echo "[record] 新しい環境なら、雛形をコピーして作る:" >&2
+    echo "[record]   cp scenes/_TEMPLATE.yaml \"scenes/${SCENE}.yaml\" && \$EDITOR \"scenes/${SCENE}.yaml\"" >&2
+    echo "[record] 実機の前で TODO を全部埋めてから、もう一度この起動を打つ。" >&2
+    echo "[record] 既存の環境で録るつもりなら、名前の綴りを確認する:" >&2
+    ls -1 "$REPO/scenes" 2>/dev/null | grep -v '^_' | sed 's/\.yaml$//; s/^/[record]   /' >&2
     exit 1
   fi
 fi
