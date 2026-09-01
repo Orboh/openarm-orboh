@@ -24,9 +24,22 @@ W=640; H=480; FPS=30
 # 右の余白カラム (320px) を wrist 専用パネル (320x240・上下中央) に転用する。
 # wrist が chest に重ならず、PICO への解像度も 720p ネイティブになる。
 OUT_W=1280; OUT_H=720
-CHEST_W=960; CHEST_H=720
-WRIST_W=320; WRIST_H=240
-WRIST_X=$CHEST_W; WRIST_Y=$(( (OUT_H - WRIST_H) / 2 ))
+# PICO のステレオ表示モードは 1280x720 のうち中央の約 4:3 (左右 ±約160px を除く)
+# しか表示しない (2026-08-31 スクショ実測: 平面=二画面モードでは全幅見えるが、
+# ステレオ化すると左右対称に刈られる)。よって全コンテンツを「中央の安全域」に
+# 収める: chest=中央 960x720 (4:3・ステレオ表示域と一致=欠けゼロ)、wrist=安全域の
+# 右下に小窓 (外側の帯はステレオで見えないため使わない)。左右の黒帯は平面モード
+# でのみ見える余白。刈り込み幅の個体差は MARGIN_LR で調整:
+#   MARGIN_LR=120 bash start-collection-cameras.sh   (狭める=コンテンツ拡大)
+MARGIN_LR="${MARGIN_LR:-160}"
+CHEST_W=$(( OUT_W - 2 * MARGIN_LR ))
+CHEST_H=$(( CHEST_W * 3 / 4 )); [ "$CHEST_H" -gt "$OUT_H" ] && CHEST_H=$OUT_H
+CHEST_H=$(( CHEST_H / 2 * 2 )); CHEST_W=$(( CHEST_H * 4 / 3 / 2 * 2 ))
+CHEST_X=$(( (OUT_W - CHEST_W) / 2 ))
+CHEST_Y=$(( (OUT_H - CHEST_H) / 2 ))
+WRIST_W=288; WRIST_H=216   # 4:3 維持・chest 右下に内側 16px で重ねる
+WRIST_X=$(( CHEST_X + CHEST_W - WRIST_W - 16 ))
+WRIST_Y=$(( CHEST_Y + CHEST_H - WRIST_H - 16 ))
 
 # product 文字列でカメラ個体を特定し、その個体の YUYV(=RGB) ノードを返す。
 # 仮想カメラ (v4l2loopback) は product が無いので自然に除外される。
@@ -137,7 +150,7 @@ ffmpeg -hide_banner -loglevel error \
   -f v4l2 -input_format yuyv422 -video_size ${W}x${H} -framerate $FPS -i /dev/video21 \
   -fflags nobuffer -flags low_delay -use_wallclock_as_timestamps 1 \
   -f v4l2 -input_format yuyv422 -video_size ${W}x${H} -framerate $FPS -i /dev/video22 \
-  -filter_complex "[0:v]scale=${CHEST_W}:${CHEST_H}[chest];[1:v]scale=${WRIST_W}:${WRIST_H}[wrist];[chest]pad=${OUT_W}:${OUT_H}:0:0:black[bg];[bg][wrist]overlay=${WRIST_X}:${WRIST_Y}:eof_action=pass,format=yuv420p" \
+  -filter_complex "[0:v]scale=${CHEST_W}:${CHEST_H}[chest];[1:v]scale=${WRIST_W}:${WRIST_H}[wrist];[chest]pad=${OUT_W}:${OUT_H}:${CHEST_X}:${CHEST_Y}:black[bg];[bg][wrist]overlay=${WRIST_X}:${WRIST_Y}:eof_action=pass,format=yuv420p" \
   -fps_mode passthrough \
   -f v4l2 /dev/video20 &
 PIDS+=($!)
