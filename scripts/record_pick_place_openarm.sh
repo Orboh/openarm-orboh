@@ -238,6 +238,18 @@ if [ -z "$PYTHON_BIN" ]; then
 fi
 MANIFEST_TOOL="$REPO/scripts/collect_manifest.py"
 
+# ---- 同期負債の警告（録る前に「古いコードで録っていないか」を見える化） --------
+# ブロックしない。現場の Thor はオフラインがあり、古いコードで録ること自体は
+# manifest に commit/branch/behind が残るので追跡できる。防ぎたいのは
+# **黙って**古いまま録ること（実例: ←破棄の根治が push 済みなのに録画機に
+# 届いておらず、誰もそれを知らなかった＝2026-09-01）。SKIP_SYNC_CHECK=true で省略可。
+if [ "${SKIP_SYNC_CHECK:-false}" != "true" ] && [ -f "$REPO/scripts/check_repo_sync.sh" ]; then
+  LEROBOT_ROOT="$("$PYTHON_BIN" -c 'import lerobot, pathlib; print(pathlib.Path(lerobot.__file__).resolve().parents[2])' 2>/dev/null || true)"
+  for _r in "$REPO" ${LEROBOT_ROOT:+"$LEROBOT_ROOT"}; do
+    bash "$REPO/scripts/check_repo_sync.sh" "$_r" >&2 || true
+  done
+fi
+
 # TODO が残ったままでは録らせない。TODO 版の sha でセッションを記録すると、
 # あとで実測値を入れた時に sha が変わり、そのセッションだけ「もう存在しない版の
 # 条件」を指したまま孤立する(遡って直せない)。
