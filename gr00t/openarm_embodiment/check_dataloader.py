@@ -1,8 +1,10 @@
 """G1 §3.5 dataloader 疎通確認（モデル抜き・ShardedSingleStepDataset 直叩き）。
 
 usage: uv run --no-sync python openarm_embodiment/check_dataloader.py <dataset_path>
+       OPENARM_CONFIG=openarm_config_wrist uv run --no-sync python ... <dataset_path>  # wrist 構成
 """
 
+import importlib
 import os
 import sys
 
@@ -10,7 +12,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import numpy as np
 
-import openarm_config  # noqa: F401  register_modality_config(NEW_EMBODIMENT)
+# どの embodiment config を登録するかを選ぶ（既定=chest 単眼）。
+#   chest 単眼      : そのまま実行
+#   chest+wrist     : OPENARM_CONFIG=openarm_config_wrist python .../check_dataloader.py <ds>
+importlib.import_module(os.environ.get("OPENARM_CONFIG", "openarm_config"))  # register_modality_config(NEW_EMBODIMENT)
 from gr00t.configs.data.embodiment_configs import MODALITY_CONFIGS
 from gr00t.data.dataset.sharded_single_step_dataset import (
     ShardedSingleStepDataset,
