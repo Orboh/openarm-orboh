@@ -1,17 +1,30 @@
-"""GR00T NEW_EMBODIMENT modality config for OpenArm (chest 単眼・8DoF).
+"""GR00T NEW_EMBODIMENT modality config for OpenArm（8DoF・カメラ構成は OPENARM_CAMERAS で決める）.
 
 launch_finetune.py に --modality_config_path openarm_embodiment/openarm_config.py で渡すと
 importlib で動的ロードされ、トップレベルの register_modality_config が NEW_EMBODIMENT に登録する。
 二重 import はレジストリの assert で弾かれる点に注意（同一プロセスで1回だけ import）。
+
+カメラ構成（openarm_cameras.py が正本）:
+  既定                   : chest,wrist_right
+  chest 単眼（50ep 再現） : OPENARM_CAMERAS=chest
+  増やす                 : OPENARM_CAMERAS=chest,wrist_right,overhead
+学習に使うデータセットの meta/modality.json（gen_modality_json.py で生成）と一致させる。
 
 action rep: single_arm=RELATIVE（N1.7 finetune_new_embodiment.md 推奨・汎化有利）/
 gripper=ABSOLUTE（SO100 既定）。収集データは絶対関節角のままで可（delta 化は内部処理）。
 正本: 02VLA/gr00t-openarm-pipeline-design.md §3.3。
 """
 
-from gr00t.configs.data.embodiment_configs import register_modality_config
-from gr00t.data.embodiment_tags import EmbodimentTag
-from gr00t.data.types import (
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from openarm_cameras import cameras_from_env  # noqa: E402
+
+from gr00t.configs.data.embodiment_configs import register_modality_config  # noqa: E402
+from gr00t.data.embodiment_tags import EmbodimentTag  # noqa: E402
+from gr00t.data.types import (  # noqa: E402
     ActionConfig,
     ActionFormat,
     ActionRepresentation,
@@ -19,10 +32,12 @@ from gr00t.data.types import (
     ModalityConfig,
 )
 
+CAMERAS = cameras_from_env()
+
 openarm_config = {
     "video": ModalityConfig(
         delta_indices=[0],
-        modality_keys=["chest"],
+        modality_keys=list(CAMERAS),
     ),
     "state": ModalityConfig(
         delta_indices=[0],
@@ -57,3 +72,4 @@ openarm_config = {
 }
 
 register_modality_config(openarm_config, embodiment_tag=EmbodimentTag.NEW_EMBODIMENT)
+print(f"[openarm_config] NEW_EMBODIMENT registered: cameras={CAMERAS}", file=sys.stderr)

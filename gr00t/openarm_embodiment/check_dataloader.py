@@ -1,10 +1,13 @@
 """G1 §3.5 dataloader 疎通確認（モデル抜き・ShardedSingleStepDataset 直叩き）。
 
 usage: uv run --no-sync python openarm_embodiment/check_dataloader.py <dataset_path>
-       OPENARM_CONFIG=openarm_config_wrist uv run --no-sync python ... <dataset_path>  # wrist 構成
+       OPENARM_CAMERAS=chest uv run --no-sync python ... <dataset_path>   # chest 単眼データのとき
+
+config 側（OPENARM_CAMERAS）とデータセット側（meta/modality.json の video キー）のカメラが
+食い違っていたら、dataloader を作る前に止める。
 """
 
-import importlib
+import json
 import os
 import sys
 
@@ -12,10 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import numpy as np
 
-# どの embodiment config を登録するかを選ぶ（既定=chest 単眼）。
-#   chest 単眼      : そのまま実行
-#   chest+wrist     : OPENARM_CONFIG=openarm_config_wrist python .../check_dataloader.py <ds>
-importlib.import_module(os.environ.get("OPENARM_CONFIG", "openarm_config"))  # register_modality_config(NEW_EMBODIMENT)
+import openarm_config  # noqa: F401  register_modality_config(NEW_EMBODIMENT)・カメラは OPENARM_CAMERAS
 from gr00t.configs.data.embodiment_configs import MODALITY_CONFIGS
 from gr00t.data.dataset.sharded_single_step_dataset import (
     ShardedSingleStepDataset,
@@ -26,6 +26,18 @@ from gr00t.data.stats import generate_rel_stats, generate_stats
 
 DS = sys.argv[1]
 tag = EmbodimentTag.NEW_EMBODIMENT
+
+# [0] config とデータセットのカメラ構成が一致しているか（違えば別モデル。ここで止める）
+_mod = os.path.join(DS, "meta", "modality.json")
+if not os.path.isfile(_mod):
+    sys.exit(f"[FAIL] {_mod} が無い。gen_modality_json.py で生成する")
+_ds_cams = list(json.load(open(_mod, encoding="utf-8")).get("video", {}).keys())
+if _ds_cams != list(openarm_config.CAMERAS):
+    sys.exit(
+        f"[FAIL] カメラ構成の不一致: config={openarm_config.CAMERAS} / dataset={_ds_cams}\n"
+        f"       OPENARM_CAMERAS={','.join(_ds_cams)} を付けて実行するか、gen_modality_json.py でデータセット側を作り直す"
+    )
+print("[0] cameras match:", _ds_cams)
 mc = MODALITY_CONFIGS[tag.value]
 print("[1] registered modality keys:", list(mc.keys()))
 
