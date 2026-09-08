@@ -28,8 +28,10 @@ eval_openarm.py — GR00T N1.7 推論 → OpenArm 実機ブリッジ（G4）
         --robot.id=follower_right \
         --robot.cameras='{"chest": {"type": "intelrealsense", "serial_number_or_name": "344422070898", "width": 640, "height": 480, "fps": 30}}' \
         --robot.max_relative_target=3 \
+        --lang_instruction="Pick up the bottle and place it in the bin" \
         --max-steps=200 \
         --dry-run=true          # ← 初回は必ず dry-run で軌道を目視してから外す
+    # --lang_instruction は必須（収集時の single_task と同じ文。2026-09-08 から既定値なし）
 """
 
 import csv
@@ -249,8 +251,12 @@ class EvalConfig:
     # 初回は短くして「予測が外れても長く走り続けない」ようにする。
     action_horizon: int = 8
 
-    # 収集時の single_task と完全に一致させること（学習時の言語条件と揃える）
-    lang_instruction: str = "Pick up the bottle and place it in the bin"
+    # 収集時の single_task と完全に一致させること（学習時の言語条件と揃える）。
+    # 2026-09-08: 既定値（ボトル用の文）を廃止して**必須**にした。既定値に頼ると別タスクの
+    # モデルを回しても指示文がボトル用のまま送られる（実測: ボトル 13 本・テープ 13 本の
+    # 全 rollout が同一の既定文だった。テープは収集時 "vinyl tape"・推論時 "bottle"）。
+    # タスクごとに --lang_instruction="<収集時の single_task と同じ文>" を必ず渡す。
+    lang_instruction: str | None = None
 
     fps: int = 30
     max_steps: int = 200  # 無限ループを避ける（雛形の while True を廃止）
@@ -446,6 +452,15 @@ def eval(cfg: EvalConfig):
         )
     else:
         logging.info(f"max_relative_target = {max_rel}（関節ごと指定）")
+
+    # B-3: 言語指示の未指定ゲート（2026-09-08）。既定値に頼ると学習時と違う指示文で推論する
+    # 事故になる（テープ実機 13 本がボトル用の文のまま走った実例）。実機を繋ぐ前に落とす。
+    if not cfg.lang_instruction or not cfg.lang_instruction.strip():
+        raise SystemExit(
+            "lang_instruction が未指定。学習時（収集時の single_task）と同じ指示文を必ず渡すこと。\n"
+            '  例: --lang_instruction="Pick up the vinyl tape and place it in the bin"'
+        )
+    logging.info(f'lang_instruction = "{cfg.lang_instruction}"（収集時の single_task と一致していること）')
 
     if cfg.dry_run:
         logging.warning("=== DRY-RUN モード: 推論のみ実行し、実機へは指令を送らない ===")

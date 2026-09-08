@@ -20,6 +20,7 @@
 #     --robot.side=right --robot.id=follower_right \
 #     --robot.cameras='{"chest": {"type":"intelrealsense","serial_number_or_name":"344422070898","width":640,"height":480,"fps":30}}' \
 #     --robot.max_relative_target=1.0 --policy_host=127.0.0.1 --policy_port=5555 \
+#     --lang_instruction="Pick up the bottle and place it in the bin" \
 #     --dry_run=false --fps=10 --max_steps=150 --action_horizon=8 --log_obs_every_step=true
 #
 # tag は英数ハイフンのみに正規化する（Vault のファイル名規則に合わせる）。
@@ -50,6 +51,19 @@ if [[ "$_has_obs_flag" == false ]]; then
   echo "ERROR: --log_obs_every_step を明示してください（既定 false・付け忘れが 2026-07-22 破綻の主因）。" >&2
   echo "  毎ステップ角/frames を残す → --log_obs_every_step=true（事前に --dry_run=true で t_sec が 1/fps に収まるか確認）" >&2
   echo "  1Hz(chunk先頭)記録で可     → --log_obs_every_step=false" >&2
+  exit 2
+fi
+
+# --- 言語指示 guard（2026-09-08）---
+# eval_openarm.py の既定値（ボトル用の文）に頼ると、別タスクのモデルでも学習時と違う指示文が
+# 送られる（実測: ボトル 13 本・テープ 13 本の全 rollout が同一の既定文。テープは収集時
+# "vinyl tape"・推論時 "bottle"）。収集時の single_task と同じ文をタスクごとに明示させ、
+# 使った文を manifest.json に残す。
+_lang=""
+for _a in "$@"; do case "$_a" in --lang_instruction=*) _lang="${_a#*=}" ;; esac; done
+if [[ -z "$_lang" ]]; then
+  echo "ERROR: --lang_instruction=\"<収集時の single_task と同じ文>\" を明示してください（2026-09-08 から必須）。" >&2
+  echo "  例: --lang_instruction=\"Pick up the vinyl tape and place it in the bin\"" >&2
   exit 2
 fi
 
@@ -112,12 +126,14 @@ jq -n \
   --arg gr_h "$(git_head  "$GR00T")"                 --arg gr_b "$(git_branch "$GR00T")" \
   --arg model "$MODEL" --arg model_sha "$MODEL_SHA" \
   --arg emb "$GR00T/openarm_embodiment/openarm_config.py" \
+  --arg lang "$_lang" \
   --arg py "$PYV" --arg hf "$HF_USER" \
   '{timestamp:$ts, tag:$tag, host:$host,
     git:{openarm_orboh:{head:$oa_h,branch:$oa_b,uncommitted_files:($oa_d|tonumber)},
          lerobot:{head:$lr_h,branch:$lr_b},
          isaac_gr00t_n17:{head:$gr_h,branch:$gr_b}},
     model:{path:$model, config_sha16:$model_sha},
+    lang_instruction:$lang,
     embodiment_config:$emb, python:$py, hf_user:$hf}' \
   > "$RUN_DIR/manifest.json"
 
