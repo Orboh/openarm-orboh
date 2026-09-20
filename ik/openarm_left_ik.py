@@ -18,7 +18,9 @@ import numpy as np
 from numpy.linalg import norm, solve
 import pinocchio as pin
 
-# repo 相対。Vector(~/projects/openarm-orboh) でも Thor(~/openarm-orboh) でも解決する
+# repo 相対。標準配置は全マシン ~/projects/<repo>(scripts/bootstrap.sh の管轄)。
+# 旧 Thor 配置(~/openarm-orboh・projects 無し)は ~/projects への移設待ちの例外で、
+# 相対解決なのでどちらでも動くが、正は前者。
 DEFAULT_URDF = os.path.normpath(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "urdf", "openarm_v10_bimanual.urdf")
 )

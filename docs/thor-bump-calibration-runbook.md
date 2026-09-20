@@ -1,7 +1,7 @@
 # Thor 実機チューニング・検証 runbook: bump-to-stop 較正と開始姿勢固定
 
 対象: OpenArm leader/follower(左右)。Vector 側でオフライン検証済みのコードを Thor 実機で仕上げるための手順。
-コード: lerobot fork `~/projects/lerobot`(branch `feat/record-headless-keyboard`)
+コード: lerobot fork `~/projects/lerobot`(branch `feat/openarm-remote-teleop`)
 中核: `src/lerobot/motors/damiao/damiao_bump_calibration.py`
 起動: `openarm-orboh/scripts/calibrate_openarm.sh <left|right> bump_to_stop`
 
