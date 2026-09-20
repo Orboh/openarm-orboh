@@ -14,7 +14,7 @@
 # ---------------------------------------------------------------------------
 name: tape-desk-itabashi-v1
 created: 2026-09-19
-measured: 2026-09-19          # 昇降表示・アーム机・ダンボール縁のみ実測。TODO 項目は未計測
+measured: 2026-09-19          # 昇降表示・アーム机・ダンボール縁・底板〜縁 30mm を実測。残る TODO は未計測
 task: tape-pick-and-place
 note: >
   板橋仮オフィス。gr00t-tape-pnp-v1 のロールアウト条件（把持は汎化・ダンボールではリリースが出ない
@@ -30,7 +30,7 @@ table:
   # アームは昇降テーブルではなく**別の固定机**（天板 710mm 実測）にマウント。
   # 作業面（昇降テーブル天板 890mm）は OpenArm 底板より約 +180mm 高い。
   # bottle-desk-v1（クランプで昇降テーブル縁に固定＝相対 0）とは別構成なので注意。
-  base_to_table_edge_mm: TODO # 底板の先端から昇降テーブルの手前縁までの水平距離（未実測）
+  base_to_table_edge_mm: 30   # 底板の先端から昇降テーブルの手前縁までの水平距離（Kento 実測 2026-09-19）
   base_mount: "固定机（天板 710mm）に固定。作業面は昇降テーブル（表示89）＝底板より約 +180mm"
 mat:
   present: false              # 天板に直置き（要確認）
@@ -55,8 +55,8 @@ object:
   condition: "劣化なし・同一個体で通す"
 place_target:
   kind: cardboard_box         # 緑の格子かご（TBR 所有・移設不可）の代用
-  position: TODO              # 天板左寄り・chest 画角で左側に一部が切れる位置（参考画像に目視で合わせた・座標未実測）
-  position_origin: TODO       # 直交 2 辺からの距離で書く
+  position: "天板左寄り・chest 画角の左側に入る位置に目視で配置（参考画像 frame_00000 に合わせる）"
+  position_origin: null       # 座標は測らない方針（Kento 2026-09-19: 位置を精密に揃えても方策側の性能が追いつかないため。変えたら新ファイル）
   markers: "無し"
   size_mm: "縁の高さ 120（机面から）・開口 TODO"
 
