@@ -13,13 +13,19 @@
 #   bash scripts/bootstrap.sh --operator       # 操作側PC用(sender の clone/build を省略。lerobot+openarm-orboh のみ)
 #   bash scripts/bootstrap.sh --check          # 読み取り専用の状態レポートのみ(一切変更しない・fetch もしない)
 #   bash scripts/bootstrap.sh --skip-setup     # scripts/setup.sh(apt/teleopビルド/udev・sudo要)を飛ばす
+#                                               # (2回目以降の再実行では推奨。setup.sh 自体は
+#                                               #  完了検知をせず毎回フル実行するため)
 #   bash scripts/bootstrap.sh --shallow        # 兄弟リポを --depth 1 で clone(fresh-clone 検証専用。本番機では使わない)
 #   PROJECTS_DIR=/path bash scripts/bootstrap.sh   # リポの基底を上書き(既定 $HOME/projects。テスト用途専用)
 #
-# 冪等性: 何度実行しても安全。clone はディレクトリ不在時のみ、venv 構築は .venv 不在時のみ、
+# 冪等性: このスクリプト自身(兄弟リポの clone・lerobot venv・sender ビルド)は
+# 何度実行しても安全。clone はディレクトリ不在時のみ、venv 構築は .venv 不在時のみ、
 # sender ビルドはバイナリ不在時のみ行う。既存リポには fetch と状態報告だけを行い、
 # checkout / reset / pull / make clean / 削除は一切しない(喪失ゼロ優先)。dirty なリポは
 # 警告して触らない。
+# 例外: scripts/setup.sh(手順5)は完了検知をせず、実行するたびに apt update・PPA 登録・
+# GitHub API 経由の curl・dpkg -i・udev ルール上書きをフルで行う(sudo 要・オフライン環境や
+# 非 sudo シェルでは毎回失敗して WARN になる)。2回目以降の再実行では --skip-setup を使うこと。
 #
 # 終了コード: 0=全緑 / 1=WARN あり(このスクリプト自身が壊れた場合を除き、途中で
 # 止めるのではなく最後まで進めて WARN として報告する「preflight」思想)。
@@ -120,7 +126,7 @@ ensure_repo() {
       return
     fi
     if [ "$CHECK_ONLY" = true ]; then
-      info "$name: 見つからない ($dir)。--check につき clone しない"
+      warn "$name: 見つからない ($dir)。--check につき clone しない"
       REPO_STATUS[$name]=WARN
       return
     fi
@@ -199,7 +205,7 @@ LEROBOT_VENV_STATUS="SKIP"
 if [ -d "$LEROBOT_DIR" ]; then
   VENV="$LEROBOT_DIR/.venv"
   if [ -d "$VENV" ]; then
-    if [ -x "$VENV/bin/python" ] && "$VENV/bin/python" -c 'import lerobot, pinocchio, zmq' >/dev/null 2>&1 \
+    if [ -x "$VENV/bin/python" ] && env PYTHONDONTWRITEBYTECODE=1 "$VENV/bin/python" -c 'import lerobot, pinocchio, zmq' >/dev/null 2>&1 \
         && { [ -x "$VENV/bin/lerobot-teleoperate" ] || [ -x "$VENV/bin/lerobot-record" ]; }; then
       ok "lerobot venv: 既存 ($VENV)。import(lerobot/pinocchio/zmq) と lerobot コマンドの実在を確認"
       LEROBOT_VENV_STATUS="OK"
@@ -208,7 +214,7 @@ if [ -d "$LEROBOT_DIR" ]; then
       LEROBOT_VENV_STATUS="WARN"
     fi
   elif [ "$CHECK_ONLY" = true ]; then
-    info "lerobot venv: --check につき未構築(構築はしない)"
+    warn "lerobot venv: --check につき未構築(構築はしない)"
     LEROBOT_VENV_STATUS="WARN"
   elif ! command -v python3 >/dev/null 2>&1; then
     warn "lerobot venv: python3 が無いので構築をスキップ"
@@ -242,7 +248,7 @@ if [ -d "$LEROBOT_DIR" ]; then
     fi
   fi
 else
-  info "lerobot venv: lerobot 自体が無いのでスキップ"
+  warn "lerobot venv: lerobot 自体が無いのでスキップ"
   LEROBOT_VENV_STATUS="WARN"
 fi
 SUMMARY+=("lerobot venv: path=$LEROBOT_DIR/.venv -> $LEROBOT_VENV_STATUS")
@@ -261,7 +267,7 @@ else
       ok "sender: 既存バイナリを尊重する ($BIN)。make clean はしない"
       SENDER_STATUS="OK"
     elif [ "$CHECK_ONLY" = true ]; then
-      info "sender: --check につきビルドしない"
+      warn "sender: --check につきビルドしない"
       SENDER_STATUS="WARN"
     else
       MISSING=()
@@ -294,7 +300,7 @@ if [ "$CHECK_ONLY" = true ]; then
 elif [ "$SKIP_SETUP" = true ]; then
   info "setup.sh: --skip-setup につきスキップ(必要になったら単体で: bash scripts/setup.sh)"
 else
-  info "setup.sh を実行する(apt 依存導入・openarm_teleop ビルド・udev ルール導入。sudo のパスワード入力が複数回出る)"
+  info "setup.sh を実行する(apt 依存導入・openarm_teleop ビルド・udev ルール導入。sudo のパスワード入力が複数回出る。完了検知はしないので2回目以降は --skip-setup 推奨)"
   if bash "$REPO/scripts/setup.sh"; then
     ok "setup.sh 完了"
   else

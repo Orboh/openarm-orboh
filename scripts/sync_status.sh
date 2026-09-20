@@ -33,10 +33,18 @@ done
 if [ -n "${REMOTE:-}" ]; then
   echo "== $REMOTE（ssh・読み取りのみ） =="
   for name in "${REPO_NAMES[@]}"; do
-    if ! timeout 15 ssh -o ConnectTimeout=10 "$REMOTE" \
-        "test -d \"\$HOME/projects/$name\""; then
+    timeout 15 ssh -o ConnectTimeout=10 "$REMOTE" \
+        "test -d \"\$HOME/projects/$name\""
+    test_rc=$?
+    if [ $test_rc -eq 1 ]; then
       echo "  [sync] $name: (このマシンには無い)"
       continue
+    elif [ $test_rc -ne 0 ]; then
+      # ssh 接続失敗(255)・timeout(124) 等。「ディレクトリ不在」と区別する
+      # (混同すると到達不能を「負債なし」と誤報する)。残りのリポへの
+      # 再接続も無駄なのでここで打ち切る。
+      echo "  [sync] $REMOTE へ到達できない(ssh $test_rc)"
+      break
     fi
     if timeout 45 ssh -o ConnectTimeout=10 "$REMOTE" \
         "NOFETCH='${NOFETCH:-false}' bash -s -- \"\$HOME/projects/$name\"" < "$CHECK"; then :; else

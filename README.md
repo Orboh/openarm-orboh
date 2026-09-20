@@ -71,6 +71,8 @@ bash scripts/run_teleop_remote_right.sh
 
 ### B. テレオペによるエピソード収集
 
+前提: §A の手順1（カメラ分配）と手順4（操作側の leader agent）を稼働させたまま、手順5の `run_teleop_remote_*.sh` は止めてから実行する（`record_remote.sh` が follower 駆動を兼ねるため、動かしたままだと `can_fol_r` の openarm_follower 掴み合い・ZMQ ポート 5701/echo 5711 の衝突で落ちる）。
+
 ```bash
 # Thor: X転送不要（素の ssh -t から）
 env -u DISPLAY -u WAYLAND_DISPLAY OPERATOR=<名前> SCENE=<scenes/のname> \
@@ -79,7 +81,7 @@ env -u DISPLAY -u WAYLAND_DISPLAY OPERATOR=<名前> SCENE=<scenes/のname> \
 
 キー操作: 右矢印 = 次のエピソード開始 / `a` = 両腕を開始姿勢へ復帰 / 左矢印 = 直前のテイクを破棄 / `esc` = 収集終了。
 
-収集後、軽量メタ（`command.sh`/`manifest.json`/`console.log`/`ledger.csv` 等。データセット本体は含まない）を Vault へ回収する:
+収集後、軽量メタ（`command.sh`/`manifest.json`/`console.log`/`ledger.csv` 等。データセット本体は含まない）を Vault へ回収する（Vault のある Vector/Mac 側で実行。Thor へ ssh して rsync するのでこのコマンド自体は Thor 上では打たない）:
 
 ```bash
 bash scripts/pull_run.sh <UTC>-<scene-tag>
