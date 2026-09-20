@@ -1,0 +1,98 @@
+# tape-desk-itabashi-v1 —— 板橋仮オフィスでの tape pick-and-place シーン（2026-09-19 起草）
+#
+# 目的: 鹿児島で Kota が収集・FT した `gr00t-tape-pnp-v1`（chest+wrist・67ep・
+#       scenes/tape-desk-v1.yaml＝TODO のまま）を、移設先の板橋で**ロールアウト**するときの
+#       物理条件を宣言する。tape-desk-v1 との差は主に「置き先が緑の格子かごではなくダンボール」。
+#       板橋で追加収集する場合もこのファイルを起点に（置き先を変えたら新ファイル）。
+#
+# 実測の出典: 2026-09-19 Kento（昇降表示89・アーム机 710mm・ダンボール縁 120mm）、
+#             Kota 構成の聞き取り（アーム机 720mm・昇降 900mm＝作業面は底板より約 +180mm）、
+#             bottle-desk-v1.yaml（カメラマウント 500mm・かご寸法）。
+# ロールアウト台帳: orboh-company-vault 07/Kento/02-Tech-Plan/02VLA/gr00t-openarm/rollouts/tape-v1/
+#
+# ルール（_TEMPLATE.yaml と同じ）: 物理配置を変えたら新ファイル。既存の中身は書き換えない。
+# ---------------------------------------------------------------------------
+name: tape-desk-itabashi-v1
+created: 2026-09-19
+measured: 2026-09-19          # 昇降表示・アーム机・ダンボール縁・底板〜縁 30mm を実測。残る TODO は未計測
+task: tape-pick-and-place
+note: >
+  板橋仮オフィス。gr00t-tape-pnp-v1 のロールアウト条件（把持は汎化・ダンボールではリリースが出ない
+  ＝台帳参照）。tape-desk-v1（鹿児島・緑かご）のデータと混ぜない（置き先の見た目が別）。
+  右腕 can_fol_r・chest D435i＋wrist_right D405（製造番号は設定ダンプ側）。
+
+# --- 机 ---------------------------------------------------------------------
+table:
+  kind: height_adjustable
+  height_mm: 890              # 表示 89 からの換算（cm 刻みの丸め・±5mm。実測したら差し替え）
+  desk_preset: "89"           # 再現キー。Kota 構成（表示 90・アーム机 720）と同じ相対 +180mm を再現
+  surface: TODO               # 天板の材質と色（画像上は白）
+  # アームは昇降テーブルではなく**別の固定机**（天板 710mm 実測）にマウント。
+  # 作業面（昇降テーブル天板 890mm）は OpenArm 底板より約 +180mm 高い。
+  # bottle-desk-v1（クランプで昇降テーブル縁に固定＝相対 0）とは別構成なので注意。
+  base_to_table_edge_mm: 30   # 底板の先端から昇降テーブルの手前縁までの水平距離（Kento 実測 2026-09-19）
+  base_mount: "固定机（天板 710mm）に固定。作業面は昇降テーブル（表示89）＝底板より約 +180mm"
+mat:
+  present: false              # 天板に直置き（要確認）
+  kind: null
+  orientation: null
+lighting:
+  source: TODO                # 板橋仮オフィスの常設照明のみか、追加光源の有無
+  window: TODO
+  daylight_controlled: false
+  daylight_recorded_at: "session layer（manifest.identity.started_local / notes.md の lighting_observed）"
+  note: "2026-09-19 のロールアウト画像は鹿児島 9/5 の参考画像より暖色で明るい（色温度差あり）"
+
+# --- 対象物 -----------------------------------------------------------------
+object:
+  kind: vinyl_tape_roll
+  count: 3                    # ロールアウト既定（試行1のみ 5 個・色物混在）
+  description: >
+    ビニールテープのロール。板橋の手持ちは白の単巻き（主）・黒・白黒・黄・青、および 3 連の大型。
+    学習データ（鹿児島）は黒 2 本＋白黒 1 本の単巻き。
+  fill: none
+  orientation: "ロール面を上にして平置き（転がらない向き）"
+  condition: "劣化なし・同一個体で通す"
+place_target:
+  kind: cardboard_box         # 緑の格子かご（TBR 所有・移設不可）の代用
+  position: "天板左寄り・chest 画角の左側に入る位置に目視で配置（参考画像 frame_00000 に合わせる）"
+  position_origin: null       # 座標は測らない方針（Kento 2026-09-19: 位置を精密に揃えても方策側の性能が追いつかないため。変えたら新ファイル）
+  markers: "無し"
+  size_mm: "縁の高さ 120（机面から）・開口 TODO"
+
+# --- 散らし方 ---------------------------------------------------------------
+scatter_policy:
+  mode: rough_area
+  layout: "天板右側（ダンボールの右）にラフ配置"
+  cells: null
+  strict: false
+  placement: TODO
+  numbering: "無し（ロールアウトのみ・収集する場合は決める）"
+  reference_mark: "無し"
+  reference_mark_position_mm: null
+  reference_mark_origin: null
+  reference_mark_in_camera_view: false
+  marking: visual_only
+  cell_size_mm: null
+  area_mm: TODO
+  per_session: null
+  session_count: 0            # 2026-09-19 時点で収集エピソード 0 本（ロールアウトのみ）
+  intentional_imbalance: null
+distractors:
+  present: false              # 試行1のみ色物テープ（黄・青）が混在＝台帳に記録
+  items: []
+
+# --- カメラの物理位置 -------------------------------------------------------
+camera_mount:
+  chest:
+    height_mm: 500            # OpenArm 底板からマウント上端まで（bottle-desk-v1 の値・公式マウント継続・板橋で未再測）
+    height_ref: "取り付けパーツの上端／OpenArm 底板からの高さ"
+    tilt_deg: TODO
+    mount_part: "OpenArm 公式のカメラマウント"
+    view_note: "ダンボールが画面左寄り（左端で一部切れる）・テープは右側・斜め上から見下ろし。作業面が底板より +180mm 高いためテープは大きく写る"
+  wrist_right:
+    height_mm: null
+    height_ref: "右腕手首のマウント（腕と一緒に動く）"
+    tilt_deg: TODO
+    mount_part: TODO          # Kota の 9/5 取り付けをそのまま使用
+    view_note: "把持対象と置き先の近接視。学習時と同じ取り付けであることが前提"
