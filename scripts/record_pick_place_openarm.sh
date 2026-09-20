@@ -38,6 +38,11 @@
 #   条件を残さない dry run は SCENE=none / TODO 入りシーンは ALLOW_TODO_SCENE=true。
 set -euo pipefail
 
+# repo ルート(このスクリプトの一つ上)。GRAVITY_URDF の既定値・POSE/SCENE の解決・
+# check_repo_sync.sh 呼び出しなど、スクリプト全体で使う。BASH_SOURCE を使うので
+# source されても解決する。
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
 # ---- Arm pair (channel_id fixed CAN names -- USB/PC independent) -------------
 SIDE="${SIDE:-left}"                        # left | right
 case "$SIDE" in
@@ -106,7 +111,9 @@ fi
 # clean across the day's sessions) so all 5 sessions share one value.
 GRAVITY_COMP="${GRAVITY_COMP:-true}"
 GRAVITY_SCALE="${GRAVITY_SCALE:-1.0}"
-GRAVITY_URDF="${GRAVITY_URDF:-$HOME/openarm-orboh/urdf/openarm_v10_bimanual.urdf}"
+# hand-port of eec9666 (cherry-pick conflicted): repo-relative ($HOME/openarm-orboh
+# 決め打ちだと Thor/Vector の ~/projects/openarm-orboh 配置で壊れる。REPO は上で解決済み)
+GRAVITY_URDF="${GRAVITY_URDF:-$REPO/urdf/openarm_v10_bimanual.urdf}"
 
 # ---- Dataset tunables --------------------------------------------------------
 NUM_EPISODES="${NUM_EPISODES:-50}"
@@ -137,7 +144,7 @@ DISPLAY_DATA="${DISPLAY_DATA:-true}"        # set false for headless dry-run
 #     無断で腕を動かさずゲート+キー押しアラインにしてある)。
 #   - 収集セッションを跨ぐ場合も同じ ready YAML を使い続ける(較正=恒久ゼロ +
 #     同一 YAML で、セッション間の座標系ずれ・開始姿勢ずれの両方を防ぐ)。
-REPO="$(cd "$(dirname "$0")/.." && pwd)"
+# REPO は冒頭で解決済み。
 POSE="$REPO/config/initial_pose_${SIDE}.yaml"
 POSE_ARGS=()
 if [ -f "$POSE" ]; then

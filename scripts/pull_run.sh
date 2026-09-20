@@ -24,6 +24,12 @@ set -euo pipefail
 
 REMOTE="${REMOTE:-thor}"
 REMOTE_DIR="${REMOTE_DIR:-collections}"   # リモートの $HOME 相対
+# Thor 側の openarm-orboh / lerobot の実配置。ik/openarm_left_ik.py のコメントが
+# 示す旧 Thor 配置(~/openarm-orboh・projects 無し)と、他スクリプトが前提とする
+# ~/projects/openarm-orboh が repo 内で矛盾しているため、環境変数で両対応にする
+# (Thor の実配置を今回変更しないための最小の手当て)。
+THOR_OPENARM_DIR="${THOR_OPENARM_DIR:-~/projects/openarm-orboh}"
+THOR_LEROBOT_DIR="${THOR_LEROBOT_DIR:-~/projects/lerobot}"
 # Vault のパスに含まれる 07Member's-free-space のアポストロフィに注意。
 # "${VAR:-...}" の既定値の中では ' が literal にならずクォート開始として解釈され、
 # スクリプト全体が「閉じていない引用符」で構文エラーになる。既定値は外に出す。
@@ -64,8 +70,8 @@ if [ "$FINALIZE" = "true" ]; then
   if [ "$DRY_RUN" = "true" ]; then
     echo "[pull] (dry-run) ssh $REMOTE finalize_run.py --run-dir ~/$REMOTE_DIR/$RUN"
   else
-    ssh "$REMOTE" "cd ~/projects/openarm-orboh && \
-      PY=\$(ls -d ~/projects/lerobot/.venv/bin/python 2>/dev/null || command -v python3) && \
+    ssh "$REMOTE" "cd $THOR_OPENARM_DIR && \
+      PY=\$(ls -d $THOR_LEROBOT_DIR/.venv/bin/python 2>/dev/null || command -v python3) && \
       \$PY scripts/finalize_run.py --run-dir $SRC" \
       2>&1 | sed 's/^/[pull] finalize: /' || echo "[pull] 警告: finalize が失敗した(回収は続ける)"
   fi
