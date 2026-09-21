@@ -81,6 +81,7 @@ def main() -> int:
     ap.add_argument("--no-viewer", action="store_true", help="表示せず疎通と fps だけ見る")
     ap.add_argument("--frames", type=int, default=0, help="この枚数で自動終了（0=Ctrl-C まで）")
     ap.add_argument("--jpeg-quality", type=int, default=60, help="送信時の JPEG 品質（0=非圧縮の生 RGB）")
+    ap.add_argument("--display-scale", type=int, default=2, help="表示用の間引き倍率（2=320x240 で送る。1=等倍）")
     ap.add_argument("--list", action="store_true", help="接続中の RealSense を列挙して終了")
     args = ap.parse_args()
 
@@ -149,9 +150,14 @@ def main() -> int:
             counts[name] += 1
             i += 1
             if rr is not None:
-                rr.set_time("time", timestamp=time.time())  # 実時刻で 3 台を揃える（ビューアのカーソルが最新へ追従）
-                img = rr.Image(np.asanyarray(color.get_data()))
-                rr.log(f"cameras/{name}", img.compress(jpeg_quality=args.jpeg_quality) if args.jpeg_quality > 0 else img)
+                # static=True: 履歴を持たず最新 1 枚だけ保持する。時系列で溜めるとビューアが数分で
+                # メモリ上限（2GB）に達し、GC で詰まって送信側がブロックし「周期的なドロップ」になる
+                # （2026-09-21 実測: ビューア無しでは 3 台 30fps・ドロップ 0）。プレビューに履歴は不要。
+                arr = np.asanyarray(color.get_data())
+                if args.display_scale > 1:  # 表示用に間引く（JPEG 圧縮と描画の負荷を 1/scale^2 に）
+                    arr = np.ascontiguousarray(arr[:: args.display_scale, :: args.display_scale])
+                img = rr.Image(arr)
+                rr.log(f"cameras/{name}", img.compress(jpeg_quality=args.jpeg_quality) if args.jpeg_quality > 0 else img, static=True)
         stop.set() if args.frames and i >= args.frames else None
 
     threads = [threading.Thread(target=worker, args=(n, p), daemon=True, name=n) for n, p in pipes.items()]
@@ -167,7 +173,7 @@ def main() -> int:
             stat = "  ".join(f"{n}:{counts[n] / dt:5.1f}fps(drop {drops[n]})" for n in pipes)
             print(f"[preview] {stat}")
             if rr is not None:
-                rr.log("stats", rr.TextLog(stat))
+                rr.log("stats", rr.TextLog(stat), static=True)
             last = now
     for t in threads:
         t.join(timeout=2.0)
