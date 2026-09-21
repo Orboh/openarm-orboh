@@ -76,12 +76,12 @@ def render(arm, iface, live, frame=0):
                  + (f"  frame={frame}" if live else ""))
     lines.append("-" * 64)
     lines.append(_pad("joint", 6) + _pad("name", 12)
-                 + f"{'pos[deg]':>9} {'pos[rad]':>9} {'vel[d/s]':>9} {'tau[Nm]':>8} {'T[C]':>5}")
+                 + f"{'pos[deg]':>9} {'pos[rad]':>9} {'vel[d/s]':>9} {'tau[Nm]':>8} {'Tmos[C]':>7} {'Trot[C]':>7}")
     for (short, name, _mtype), m in zip(LABELS, motors):
         p, v = m.get_position(), m.get_velocity()
         lines.append(_pad(short, 6) + _pad(name, 12)
                      + f"{math.degrees(p):>+9.1f} {p:>9.4f} {math.degrees(v):>9.1f}"
-                     + f" {m.get_torque():>8.3f} {m.get_state_tmos():>5.0f}")
+                     + f" {m.get_torque():>8.3f} {m.get_state_tmos():>7.0f} {m.get_state_trotor():>7.0f}")
     lines.append("-" * 64)
     if live:
         lines.append("(Ctrl-C で終了)")

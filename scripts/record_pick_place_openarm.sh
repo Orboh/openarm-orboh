@@ -26,7 +26,15 @@
 #   WRIST=true bash scripts/record_pick_place_openarm.sh <tag>                    # chest + D405 wrist (2-cam, separate dataset)
 #   REMOTE=true bash scripts/record_pick_place_openarm.sh <tag>                    # 遠隔テレオペ収集 (leader は操作側PCの leader_agent)
 #   CHEST_V4L2=/dev/video11 ... bash scripts/record_pick_place_openarm.sh <tag>    # chest を仮想カメラから取る (PICO 分配・下記)
+#   RESUME=true REPO_ID=Orboh/openarm_..._20260905_135813 \
+#     DATASET_ROOT=$HOME/.cache/huggingface/lerobot/Orboh/openarm_..._20260905_135813 \
+#     NUM_EPISODES=30 bash scripts/record_pick_place_openarm.sh <tag>
+#     # 既存データセットに追記。REPO_IDはstamp後の実名・DATASET_ROOTは実ディレクトリを明示必須
+#     # (resume()はroot=None=Hub用リビジョン安全キャッシュへの書き込みを拒否するため)。
+#     # NUM_EPISODESは今回追加分(累計ではない)。
 #   NUM_EPISODES=2 DISPLAY_DATA=false bash scripts/record_pick_place_openarm.sh t # dry run
+#   DISPLAY_DATA=true DISPLAY_IP=<操作側PCのIP> DISPLAY_PORT=9876 \
+#     bash scripts/record_pick_place_openarm.sh <tag>    # 手元PCで起動済みの rerun へ映像をストリーミング
 #
 # 1収集セッション = 1 run_dir: ~/collections/<UTC>-<scene-tag>/ に
 #   console.log(端末全文・設定ダンプ込み) / start-pose-<side>.jsonl /
@@ -64,6 +72,19 @@ CHEST_V4L2="${CHEST_V4L2:-}"
 # WRIST_V4L2: 同上の wrist 版。PiP 分配 (start-collection-cameras.sh) は実カメラ
 # 2台とも V4L2 で占有するので、分配併用時は両方を仮想カメラ経由にする。
 WRIST_V4L2="${WRIST_V4L2:-}"
+
+# ---- 遠隔プレビュー (rerun を別マシンの既存ビューアへストリーミング) ----------
+# DISPLAY_IP/DISPLAY_PORT を指定すると、Thor 側で rr.spawn() せず
+# rr.connect_grpc() で指定先の rerun ビューアへ繋ぐ(lerobot の --display_ip/
+# --display_port 引数)。ヘッドレス収集機(Thor)から、あらかじめ `rerun` を
+# 起動済みの手元PC(既定ポート9876で待受)へ映像を飛ばす用途。
+# 両方揃っていない場合は指定しない(DISPLAY_DATA=true と併用する)。
+DISPLAY_IP="${DISPLAY_IP:-}"
+DISPLAY_PORT="${DISPLAY_PORT:-}"
+DISPLAY_ARGS=()
+if [ -n "$DISPLAY_IP" ] && [ -n "$DISPLAY_PORT" ]; then
+  DISPLAY_ARGS+=(--display_ip="$DISPLAY_IP" --display_port="$DISPLAY_PORT")
+fi
 
 # Build the cameras dict: chest always; append wrist_<SIDE> only when WRIST=true
 if [ -n "$CHEST_V4L2" ]; then
@@ -109,7 +130,7 @@ GRAVITY_SCALE="${GRAVITY_SCALE:-1.0}"
 GRAVITY_URDF="${GRAVITY_URDF:-$HOME/openarm-orboh/urdf/openarm_v10_bimanual.urdf}"
 
 # ---- Dataset tunables --------------------------------------------------------
-NUM_EPISODES="${NUM_EPISODES:-50}"
+NUM_EPISODES="${NUM_EPISODES:-50}"          # RESUME=true 時は「今回追加で録る本数」(累計ではない)
 EPISODE_TIME_S="${EPISODE_TIME_S:-20}"
 RESET_TIME_S="${RESET_TIME_S:-10}"
 # Dataset name encodes the camera set so monocular and multi-cam never mix (plan: openarm_<task>_<cams>_vN)
@@ -120,6 +141,22 @@ else
 fi
 TASK="${TASK:-Pick up the okra and place it in the bin}"
 DISPLAY_DATA="${DISPLAY_DATA:-true}"        # set false for headless dry-run
+# RESUME=true で既存データセットに追記する(--dataset.resume相当)。REPO_IDは
+# 前回スタンプされた実際のローカル名(例: openarm_..._YYYYMMDD_HHMMSS)を指定すること
+# ——stamp前の名前だと別データセットとして新規作成されてしまう。
+# resume() は root=None(既定のHub用リビジョン安全キャッシュ)への書き込みを拒否する
+# (ValueError: "requires an explicit 'root' directory")。RESUME=true 使用時は
+# DATASET_ROOT に実ディレクトリ(通常 $HF_LEROBOT_HOME/<REPO_ID> と同じ)を明示すること。
+RESUME="${RESUME:-false}"
+DATASET_ROOT="${DATASET_ROOT:-}"
+ROOT_ARGS=()
+if [ -n "$DATASET_ROOT" ]; then
+  ROOT_ARGS+=(--dataset.root="$DATASET_ROOT")
+fi
+# Thor自身のローカル音声(spd-say)は既知のハング要因(2026-09-05実機で"Stop recording"の
+# blocking=True呼び出しが固まり、プロセスが停止したまま応答しなくなった)。Desktop側の
+# 音声中継(console.logのlogging.info行を監視)には影響しないので、既定でOFFにする。
+PLAY_SOUNDS="${PLAY_SOUNDS:-false}"
 
 # ---- Start pose alignment (captured "ready" pose, optional) ------------------
 # キャプチャ済み(scripts/capture_initial_pose.sh $SIDE)なら follower/leader の
@@ -384,7 +421,7 @@ fi
     echo "[record] side=$SIDE  follower=$FOLLOWER_PORT  leader=$LEADER_PORT"
   fi
   echo "[record] cameras=$CAMERAS"
-  echo "[record] wrist=$WRIST  repo_id=$REPO_ID  episodes=$NUM_EPISODES  ${CAMERA_W}x${CAMERA_H}@${FPS}fps"
+  echo "[record] wrist=$WRIST  repo_id=$REPO_ID  resume=$RESUME  root=${DATASET_ROOT:-<default>}  play_sounds=$PLAY_SOUNDS  episodes(this session)=$NUM_EPISODES  ${CAMERA_W}x${CAMERA_H}@${FPS}fps"
   echo "[record] gravity_comp=$GRAVITY_COMP scale=$GRAVITY_SCALE side=$SIDE urdf=$GRAVITY_URDF"
   echo "[record] episode_advance=$EPISODE_ADVANCE"
   if [ "$EPISODE_ADVANCE" = "manual" ]; then
@@ -472,6 +509,8 @@ COMMAND_SH="$RUN_DIR/command.sh"
   printf 'CAMERA_W=%q CAMERA_H=%q FPS=%q \\\n' "$CAMERA_W" "$CAMERA_H" "$FPS"
   printf 'NUM_EPISODES=%q EPISODE_TIME_S=%q RESET_TIME_S=%q \\\n' "$NUM_EPISODES" "$EPISODE_TIME_S" "$RESET_TIME_S"
   printf 'REPO_ID=%q \\\n' "$REPO_ID"
+  printf 'RESUME=%q DATASET_ROOT=%q \\\n' "$RESUME" "$DATASET_ROOT"
+  printf 'PLAY_SOUNDS=%q \\\n' "$PLAY_SOUNDS"
   printf 'TASK=%q \\\n' "$TASK"
   printf 'GRAVITY_COMP=%q GRAVITY_SCALE=%q GRAVITY_URDF=%q \\\n' "$GRAVITY_COMP" "$GRAVITY_SCALE" "$GRAVITY_URDF"
   printf 'EPISODE_ADVANCE=%q START_POSE_TOL_DEG=%q START_POSE_MAX_WAIT_S=%q \\\n' \
@@ -522,7 +561,11 @@ set +e
   --robot.cameras="$CAMERAS" \
   "${TELEOP_ARGS[@]}" \
   --display_data="$DISPLAY_DATA" \
+  "${DISPLAY_ARGS[@]}" \
+  --resume="$RESUME" \
+  --play_sounds="$PLAY_SOUNDS" \
   --dataset.repo_id="$REPO_ID" \
+  "${ROOT_ARGS[@]}" \
   --dataset.single_task="$TASK" \
   --dataset.fps="$FPS" \
   --dataset.num_episodes="$NUM_EPISODES" \
