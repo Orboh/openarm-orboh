@@ -187,6 +187,40 @@ def run_logger(ifaces: list[str], out_path: str, print_every: float) -> int:
     # 状態管理: 直近5秒の |tau| リングバッファと現在 state（初回遷移検出用）
     ring: dict[tuple, list[tuple[float, float]]] = {}
     cur_state: dict[tuple, int] = {}
+    # 無応答イベント検出（接点の開閉を姿勢と結びつける・2026-09-21 右 leader J5〜gripper の姿勢依存断）:
+    # バスに他モータの応答が続いているのに特定モータだけ LOST_AFTER_S 以上応答が無ければ LOST、
+    # 戻ったら BACK。どちらも同バスの joint_1..4 の角度を添えて CSV（iface=EVENT）と画面に出す。
+    LOST_AFTER_S = 0.3
+    last_seen: dict[tuple, float] = {}
+    last_pos: dict[tuple, float] = {}
+    lost: set = set()
+    bus_last: dict[str, float] = {}
+
+    def blank_row(t_rel_v: float, iface_v: str, text: str) -> dict:
+        r = {k: "" for k in CSV_FIELDS}
+        r.update({"t_wall": dt.datetime.now(dt.timezone.utc).isoformat(), "t_rel": f"{t_rel_v:.4f}",
+                  "iface": iface_v, "motor": text})
+        return r
+
+    def posture(iface_v: str) -> str:
+        return " ".join(f"J{i}={last_pos.get((iface_v, f'joint_{i}'), float('nan'))*57.2958:.1f}" for i in range(1, 5))
+
+    def can_stats(iface_v: str) -> str:
+        import subprocess
+        try:
+            out = subprocess.run(["ip", "-s", "-details", "link", "show", iface_v], capture_output=True, text=True, timeout=1).stdout
+        except Exception:
+            return "n/a"
+        st = ""; berr = ""; cnts = ""
+        lines_ = out.splitlines()
+        for i, l in enumerate(lines_):
+            if "berr-counter" in l:
+                st = l.strip().split("berr-counter")[0].strip(); berr = "berr-counter" + l.split("berr-counter", 1)[1].strip()
+            if "bus-errors" in l and i + 1 < len(lines_):
+                cnts = "restarted/bus-err/arb-lost/err-warn/err-pass/bus-off=" + "/".join(lines_[i + 1].split()[:6])
+        return f"{st} {berr} {cnts}".strip()
+
+    last_stats = time.monotonic()
     counts: dict[str, int] = {i: 0 for i in ifaces}
     tmax_seen: dict[tuple, int] = {}
     last_print = time.monotonic()
@@ -212,6 +246,17 @@ def run_logger(ifaces: list[str], out_path: str, print_every: float) -> int:
                     while buf and t_rel - buf[0][0] > 5.0:
                         buf.pop(0)
                     st = int(row["state_hex"], 16)
+                    last_seen[key] = t_rel
+                    bus_last[row["iface"]] = t_rel
+                    try:
+                        last_pos[key] = float(row["pos_rad"])
+                    except (KeyError, ValueError):
+                        pass
+                    if key in lost:
+                        lost.discard(key)
+                        msg = f"BACK {row['iface']} {row['motor']} at t_rel={t_rel:.2f}s posture[{posture(row['iface'])}] canstat[{can_stats(row['iface'])}]"
+                        print(">>> " + msg)
+                        writer.writerow(blank_row(t_rel, "EVENT", msg))
                     prev = cur_state.get(key)
                     cur_state[key] = st
                     tmax_seen[key] = max(tmax_seen.get(key, 0), int(row["t_rotor"]))
@@ -226,6 +271,21 @@ def run_logger(ifaces: list[str], out_path: str, print_every: float) -> int:
                 last_any = time.monotonic()
 
             now = time.monotonic()
+            # LOST 判定: バスは生きている（0.3 秒以内に誰かが応答）のに、そのモータだけ 0.3 秒以上無応答
+            t_now_rel = now - t0_mono
+            for key, seen in list(last_seen.items()):
+                iface_v, motor_v = key
+                if key in lost:
+                    continue
+                if t_now_rel - seen > LOST_AFTER_S and t_now_rel - bus_last.get(iface_v, 0.0) < LOST_AFTER_S:
+                    lost.add(key)
+                    msg = f"LOST {iface_v} {motor_v} at t_rel={t_now_rel:.2f}s (last seen {seen:.2f}s) posture[{posture(iface_v)}] canstat[{can_stats(iface_v)}]"
+                    print(">>> " + msg)
+                    writer.writerow(blank_row(t_now_rel, "EVENT", msg))
+            if now - last_stats >= 1.0:
+                for iface_v in ifaces:
+                    writer.writerow(blank_row(t_now_rel, "CANSTAT", f"{iface_v} {can_stats(iface_v)}"))
+                last_stats = now
             if now - last_flush > 1.0:
                 f.flush()
                 last_flush = now
