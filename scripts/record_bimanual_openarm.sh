@@ -112,6 +112,20 @@ GRAVITY_COMP="${GRAVITY_COMP:-true}"
 LSCALE="${LSCALE:-1.0}"
 RSCALE="${RSCALE:-1.0}"
 GRAVITY_URDF="${GRAVITY_URDF:-$REPO/urdf/openarm_v10_bimanual.urdf}"
+
+# ---- Follower gripper kp (熱対策) --------------------------------------------
+# 2026-09-21 板橋: 木材/積み木の握り込みで follower gripper(dm4310) がコイル過温ラッチ
+# (0xC・OT 100℃)。両腕 teleop の積み木練習で左右とも gripper 99℃。kp 25 では握り込みの
+# 停動トルクが飽和して銅損 ≈55W(2〜4K/s)。GRIPPER_KP で飽和トルクを抑える(10〜12 目安・
+# 滑るなら 15)。空なら lerobot 既定(25)のまま。腕 7 関節の kp は ARM_KP(既定値)で固定。
+# 値は console.log の設定ダンプ(position_kp)と command.sh に残る。
+GRIPPER_KP="${GRIPPER_KP:-}"
+ARM_KP="${ARM_KP:-240,240,240,240,24,31,25}"
+KP_ARGS=()
+if [ -n "$GRIPPER_KP" ]; then
+  KP_ARGS+=(--robot.left_arm_config.position_kp="[${ARM_KP},${GRIPPER_KP}]" \
+           --robot.right_arm_config.position_kp="[${ARM_KP},${GRIPPER_KP}]")
+fi
 # manifest の control_variables.gravity_scale は 1 値しか持てない
 # (collect_manifest.py init --gravity-scale は float 1 個)。LSCALE != RSCALE
 # だと片方しか manifest に残らず「非対称で録っていた」ことが後から追跡できなく
@@ -476,6 +490,7 @@ COMMAND_SH="$RUN_DIR/command.sh"
   printf 'TASK=%q \\\n' "$TASK"
   printf 'TASK_SLUG=%q \\\n' "$TASK_SLUG"
   printf 'GRAVITY_COMP=%q LSCALE=%q RSCALE=%q GRAVITY_URDF=%q \\\n' "$GRAVITY_COMP" "$LSCALE" "$RSCALE" "$GRAVITY_URDF"
+  printf 'GRIPPER_KP=%q ARM_KP=%q \\\n' "$GRIPPER_KP" "$ARM_KP"
   printf 'EPISODE_ADVANCE=%q START_POSE_TOL_DEG=%q START_POSE_MAX_WAIT_S=%q \\\n' \
     "$EPISODE_ADVANCE" "$START_POSE_TOL_DEG" "$START_POSE_MAX_WAIT_S"
   printf 'DISPLAY_DATA=%q \\\n' "$DISPLAY_DATA"
@@ -518,6 +533,7 @@ set +e
   --dataset.repo_id="$REPO_ID" ${ROOT_ARGS[@]+"${ROOT_ARGS[@]}"} --dataset.single_task="$TASK" --dataset.fps="$FPS" \
   --dataset.num_episodes="$NUM_EPISODES" --dataset.episode_time_s="$EPISODE_TIME_S" --dataset.reset_time_s="$RESET_TIME_S" \
   --dataset.push_to_hub=false \
+  ${KP_ARGS[@]+"${KP_ARGS[@]}"} \
   ${POSE_ARGS[@]+"${POSE_ARGS[@]}"} \
   "${GATE_ARGS[@]}" 2>&1 | tee -a "$CONSOLE_LOG"
 RC=${PIPESTATUS[0]}

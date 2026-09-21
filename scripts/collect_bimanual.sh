@@ -9,6 +9,7 @@
 #   bash scripts/collect_bimanual.sh session s2 [10]     # 続きのセッション（タグ <slug>-v1-s2・本数既定 10）
 #   RESUME=true DATASET_ROOT=... bash scripts/collect_bimanual.sh session s2   # 既存データセットへ追記（本体の契約どおり）
 #   DISPLAY_IP=<手元PC> DISPLAY_PORT=9876 bash scripts/collect_bimanual.sh gate # 手元の rerun へ映像を飛ばす
+#   GRIPPER_KP=12 bash scripts/collect_bimanual.sh gate      # follower gripper の kp を下げる(熱対策・2026-09-21。env に書いてもよい)
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 ENV_FILE="${ENV_FILE:-$REPO/config/bimanual-collect.env}"
