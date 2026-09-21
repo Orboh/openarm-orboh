@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# Thor のモニターに rerun ビューアを常駐させ、3 眼プレビュー（camera_preview.py）を流す/止める。
+#
+#   bash scripts/preview_on_monitor.sh start          # ビューア(無ければ起動) + プレビュー開始
+#   bash scripts/preview_on_monitor.sh stop-preview   # プレビューだけ止める（record を起動する前に必ず）
+#   bash scripts/preview_on_monitor.sh stop           # 両方止める
+#   bash scripts/preview_on_monitor.sh status
+#
+# ビューアは gRPC :9876 で待受。record は DISPLAY_DATA=true DISPLAY_IP=127.0.0.1 DISPLAY_PORT=9876
+# で同じビューアに流す（camera_preview.py と RealSense を同時に開けないので、record 前に stop-preview）。
+# DISPLAY/XAUTHORITY はログイン中の gnome-shell の環境から拾う（引数 DISPLAY=… で上書き可）。
+set -uo pipefail
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
+VENV="$HOME/projects/lerobot/.venv/bin"
+RUN="$HOME/.cache/openarm-preview"; mkdir -p "$RUN"
+PORT="${PORT:-9876}"
+CMD="${1:-status}"
+
+viewer_pid(){ [ -f "$RUN/viewer.pid" ] && kill -0 "$(cat "$RUN/viewer.pid")" 2>/dev/null && cat "$RUN/viewer.pid"; }
+preview_pid(){ [ -f "$RUN/preview.pid" ] && kill -0 "$(cat "$RUN/preview.pid")" 2>/dev/null && cat "$RUN/preview.pid"; }
+port_open(){ ss -ltn 2>/dev/null | grep -q ":${PORT} "; }
+
+detect_display(){
+  # ログイン中のデスクトップ（gnome-shell）の DISPLAY/XAUTHORITY を借りる
+  local p
+  for p in $(pgrep -u "$USER" -x gnome-shell); do
+    DISPLAY_D="$(tr '\0' '\n' < /proc/$p/environ | sed -n 's/^DISPLAY=//p' | head -1)"
+    XAUTH_D="$(tr '\0' '\n' < /proc/$p/environ | sed -n 's/^XAUTHORITY=//p' | head -1)"
+    [ -n "$DISPLAY_D" ] && break
+  done
+  DISPLAY_D="${DISPLAY:-${DISPLAY_D:-}}"; XAUTH_D="${XAUTHORITY:-${XAUTH_D:-}}"
+}
+
+case "$CMD" in
+  start)
+    if port_open; then
+      echo "[monitor] viewer: already listening on :$PORT (pid $(viewer_pid 2>/dev/null || echo '?'))"
+    else
+      detect_display
+      [ -n "$DISPLAY_D" ] || { echo "[monitor] デスクトップにログインしていない（gnome-shell 無し）。モニターでログインしてから。" >&2; exit 1; }
+      DISPLAY="$DISPLAY_D" XAUTHORITY="$XAUTH_D" setsid nohup "$VENV/rerun" --port "$PORT" --memory-limit 2GB \
+        > "$RUN/viewer.log" 2>&1 < /dev/null &
+      echo $! > "$RUN/viewer.pid"
+      for _ in 1 2 3 4 5 6 7 8 9 10; do sleep 1; port_open && break; done
+      port_open && echo "[monitor] viewer: started on DISPLAY=$DISPLAY_D, listening :$PORT (pid $(cat "$RUN/viewer.pid"))" \
+                || { echo "[monitor] viewer が :$PORT で待受しない。log:"; tail -5 "$RUN/viewer.log"; exit 1; }
+    fi
+    if [ -n "$(preview_pid)" ]; then
+      echo "[monitor] preview: already running (pid $(preview_pid))"
+    else
+      setsid nohup "$VENV/python" "$REPO/scripts/camera_preview.py" --ip 127.0.0.1 --port "$PORT" \
+        > "$RUN/preview.log" 2>&1 < /dev/null &
+      echo $! > "$RUN/preview.pid"
+      sleep 6
+      if [ -n "$(preview_pid)" ]; then echo "[monitor] preview: started (pid $(cat "$RUN/preview.pid"))"; else echo "[monitor] preview が落ちた。log:"; tail -8 "$RUN/preview.log"; exit 1; fi
+    fi
+    tail -3 "$RUN/preview.log"
+    ;;
+  stop-preview)
+    p="$(preview_pid)"; if [ -n "$p" ]; then kill -INT "$p"; sleep 2; kill -0 "$p" 2>/dev/null && kill "$p"; echo "[monitor] preview: stopped"; else echo "[monitor] preview: not running"; fi
+    rm -f "$RUN/preview.pid"
+    ;;
+  stop)
+    "$0" stop-preview
+    v="$(viewer_pid)"; if [ -n "$v" ]; then kill "$v"; echo "[monitor] viewer: stopped"; else echo "[monitor] viewer: not running (pidfile)"; fi
+    rm -f "$RUN/viewer.pid"
+    ;;
+  status)
+    echo "[monitor] viewer: $( port_open && echo "listening :$PORT" || echo "not listening" ) pid=$(viewer_pid || echo -)"
+    echo "[monitor] preview: pid=$(preview_pid || echo -)"
+    [ -f "$RUN/preview.log" ] && tail -2 "$RUN/preview.log"
+    ;;
+  *) echo "usage: $0 start|stop-preview|stop|status" >&2; exit 1 ;;
+esac
