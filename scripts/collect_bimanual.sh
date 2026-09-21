@@ -13,8 +13,15 @@ set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 ENV_FILE="${ENV_FILE:-$REPO/config/bimanual-collect.env}"
 [ -f "$ENV_FILE" ] || { echo "[collect-bi] 設定ファイルが無い: $ENV_FILE" >&2; exit 1; }
+# env ファイルは「既定値」。呼び出し側で明示した変数（空文字を含む）はそちらを優先する
+# （例: D405_GAIN= で今回だけ焼かない、OPERATOR=Kota で録る人を変える）。
+declare -A _caller=()
+for _v in $(sed -n 's/^\([A-Z_][A-Z0-9_]*\)=.*/\1/p' "$ENV_FILE"); do
+  if [ -n "${!_v+x}" ]; then _caller["$_v"]="${!_v}"; fi
+done
 # shellcheck disable=SC1090
 set -a; source "$ENV_FILE"; set +a
+for _v in "${!_caller[@]}"; do printf -v "$_v" '%s' "${_caller[$_v]}"; export "$_v"; done
 
 MODE="${1:-}"
 case "$MODE" in
@@ -57,5 +64,15 @@ export CAM_SERIAL="${CHEST_SERIAL:-344422070898}"
 export WRIST_RIGHT="${WRIST_RIGHT:-true}" WRIST_RIGHT_SERIAL WRIST_LEFT WRIST_LEFT_SERIAL
 
 echo "[collect-bi] mode=$MODE tag=$TAG episodes=$NUM_EPISODES scene=$SCENE task='$TASK' cams=chest+$( [ "$WRIST_RIGHT" = true ] && printf 'wrist_right' )$( [ "$WRIST_LEFT" = true ] && printf '+wrist_left' ) repo_id=${REPO_ID:-<auto>}"
+# RealSense は SDK 直読が排他: モニター用プレビューが動いていれば止める。次いで D405 の露出/ゲインを焼く
+bash "$REPO/scripts/preview_on_monitor.sh" stop-preview >/dev/null 2>&1 || true
+_cs=()
+[ -n "${D405_GAIN:-}" ] && _cs+=(--d405-gain "$D405_GAIN" --d405-exposure "${D405_EXPOSURE:-28000}")
+[ -n "${D435_BRIGHTNESS:-}" ] && _cs+=(--d435-brightness "$D435_BRIGHTNESS")
+if [ ${#_cs[@]} -gt 0 ]; then
+  sleep 2
+  "$HOME/projects/lerobot/.venv/bin/python" "$REPO/scripts/camera_setup.py" "${_cs[@]}" || { echo "[collect-bi] camera_setup（${_cs[*]}）に失敗。カメラを掴んでいるプロセスが無いか確認" >&2; exit 1; }
+fi
+export D405_GAIN D405_EXPOSURE D435_BRIGHTNESS
 # pynput が無言でキーを食う既知問題の予防（ssh -X でも DISPLAY を落として stdin 直読みにする）
 exec env -u DISPLAY -u WAYLAND_DISPLAY bash "$REPO/scripts/record_bimanual_openarm.sh" "$TAG"

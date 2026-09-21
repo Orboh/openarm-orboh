@@ -11,6 +11,9 @@ rerun を使い、--display_ip/--display_port で「起動済みビューア」�
    起動する前に、このプレビューは Ctrl-C で止めること（止めないと record 側が
    カメラを開けず落ちる。09-19 の PICO sender と同じ種類の衝突）。
 
+ラグ: SDK は既定で 0.2 秒ごとにまとめて送る（RERUN_FLUSH_TICK_SECS）。preview_on_monitor.sh は
+0.01 にして即送りにしている。手で起動するときも同じ env を付ける。
+
 使い方（Thor）:
   1. モニターのデスクトップで（または ssh から DISPLAY を指定して）ビューアを起動:
        ~/projects/lerobot/.venv/bin/rerun --port 9876 --memory-limit 2GB
@@ -77,6 +80,7 @@ def main() -> int:
     ap.add_argument("--spawn", action="store_true", help="接続でなく、この端末の DISPLAY にビューアを spawn する")
     ap.add_argument("--no-viewer", action="store_true", help="表示せず疎通と fps だけ見る")
     ap.add_argument("--frames", type=int, default=0, help="この枚数で自動終了（0=Ctrl-C まで）")
+    ap.add_argument("--jpeg-quality", type=int, default=60, help="送信時の JPEG 品質（0=非圧縮の生 RGB）")
     ap.add_argument("--list", action="store_true", help="接続中の RealSense を列挙して終了")
     args = ap.parse_args()
 
@@ -115,23 +119,26 @@ def main() -> int:
             p.stop()
         return 1
 
-    stop = False
+    import threading
+
+    stop = threading.Event()
 
     def _sig(*_):
-        nonlocal stop
-        stop = True
+        stop.set()
 
     signal.signal(signal.SIGINT, _sig)
     signal.signal(signal.SIGTERM, _sig)
 
     counts = dict.fromkeys(pipes, 0)
     drops = dict.fromkeys(pipes, 0)
-    t0 = time.monotonic()
-    last = t0
-    i = 0
-    while not stop and (args.frames == 0 or i < args.frames):
-        for name, p in pipes.items():
-            ok, frames = p.try_wait_for_frames(timeout_ms=200)
+
+    # ラグ対策: カメラごとにスレッドで受けて「届いた瞬間に」送る（直列待ちだと 1 台の遅れが
+    # 全体に乗る）。送信は JPEG 圧縮（生 RGB 0.9MB/枚 → 数十 KB）でビューアの gRPC と描画の
+    # 負荷を落とす。pipeline のキューは最新 1 枚なので、送信が遅れても古い絵は溜まらない。
+    def worker(name: str, p) -> None:
+        i = 0
+        while not stop.is_set() and (args.frames == 0 or i < args.frames):
+            ok, frames = p.try_wait_for_frames(timeout_ms=500)
             if not ok:
                 drops[name] += 1
                 continue
@@ -140,10 +147,20 @@ def main() -> int:
                 drops[name] += 1
                 continue
             counts[name] += 1
+            i += 1
             if rr is not None:
-                rr.set_time("frame", sequence=i)
-                rr.log(f"cameras/{name}", rr.Image(np.asanyarray(color.get_data())))
-        i += 1
+                rr.set_time("time", timestamp=time.time())  # 実時刻で 3 台を揃える（ビューアのカーソルが最新へ追従）
+                img = rr.Image(np.asanyarray(color.get_data()))
+                rr.log(f"cameras/{name}", img.compress(jpeg_quality=args.jpeg_quality) if args.jpeg_quality > 0 else img)
+        stop.set() if args.frames and i >= args.frames else None
+
+    threads = [threading.Thread(target=worker, args=(n, p), daemon=True, name=n) for n, p in pipes.items()]
+    for t in threads:
+        t.start()
+    t0 = time.monotonic()
+    last = t0
+    while not stop.is_set():
+        time.sleep(0.2)
         now = time.monotonic()
         if now - last >= 2.0:
             dt = now - t0
@@ -152,6 +169,8 @@ def main() -> int:
             if rr is not None:
                 rr.log("stats", rr.TextLog(stat))
             last = now
+    for t in threads:
+        t.join(timeout=2.0)
 
     for p in pipes.values():
         p.stop()

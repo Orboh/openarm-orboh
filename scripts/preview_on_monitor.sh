@@ -15,6 +15,15 @@ VENV="$HOME/projects/lerobot/.venv/bin"
 RUN="$HOME/.cache/openarm-preview"; mkdir -p "$RUN"
 PORT="${PORT:-9876}"
 CMD="${1:-status}"
+# D405 の露出/ゲイン（自動露出だと暗い・2026-09-21 実測）。config/bimanual-collect.env の D405_GAIN を既定にする
+ENV_FILE="${ENV_FILE:-$REPO/config/bimanual-collect.env}"
+envdef(){ sed -n "s/^$1=\([0-9-]*\).*/\1/p" "$ENV_FILE" 2>/dev/null | head -1; }
+if [ -f "$ENV_FILE" ]; then
+  [ -n "${D405_GAIN+x}" ] || D405_GAIN="$(envdef D405_GAIN)"
+  [ -n "${D405_EXPOSURE+x}" ] || D405_EXPOSURE="$(envdef D405_EXPOSURE)"
+  [ -n "${D435_BRIGHTNESS+x}" ] || D435_BRIGHTNESS="$(envdef D435_BRIGHTNESS)"
+fi
+cam_setup_args(){ local a=(); [ -n "${D405_GAIN:-}" ] && a+=(--d405-gain "$D405_GAIN" --d405-exposure "${D405_EXPOSURE:-28000}"); [ -n "${D435_BRIGHTNESS:-}" ] && a+=(--d435-brightness "$D435_BRIGHTNESS"); printf "%s\n" "${a[@]}"; }
 
 viewer_pid(){ [ -f "$RUN/viewer.pid" ] && kill -0 "$(cat "$RUN/viewer.pid")" 2>/dev/null && cat "$RUN/viewer.pid"; }
 preview_pid(){ [ -f "$RUN/preview.pid" ] && kill -0 "$(cat "$RUN/preview.pid")" 2>/dev/null && cat "$RUN/preview.pid"; }
@@ -45,10 +54,17 @@ case "$CMD" in
       port_open && echo "[monitor] viewer: started on DISPLAY=$DISPLAY_D, listening :$PORT (pid $(cat "$RUN/viewer.pid"))" \
                 || { echo "[monitor] viewer が :$PORT で待受しない。log:"; tail -5 "$RUN/viewer.log"; exit 1; }
     fi
+    # モニターの暗転防止（X の DPMS とスクリーンセーバ。X セッション毎にリセットされるので毎回）
+    detect_display
+    if [ -n "${DISPLAY_D:-}" ]; then DISPLAY="$DISPLAY_D" XAUTHORITY="$XAUTH_D" xset s off -dpms 2>/dev/null && echo "[monitor] dpms/screensaver off on $DISPLAY_D"; fi
     if [ -n "$(preview_pid)" ]; then
       echo "[monitor] preview: already running (pid $(preview_pid))"
     else
-      setsid nohup "$VENV/python" "$REPO/scripts/camera_preview.py" --ip 127.0.0.1 --port "$PORT" \
+      # カメラを誰も掴んでいない今のうちに D405 の露出/ゲインを焼く（設定はデバイスに残る）
+      mapfile -t _cs < <(cam_setup_args)
+      if [ ${#_cs[@]} -gt 0 ]; then "$VENV/python" "$REPO/scripts/camera_setup.py" "${_cs[@]}" || echo "[monitor] camera_setup 失敗（続行）"; fi
+      # RERUN_FLUSH_TICK_SECS: SDK の送信バッファ（既定 0.2 秒）を短くしてラグを削る
+      RERUN_FLUSH_TICK_SECS="${RERUN_FLUSH_TICK_SECS:-0.01}" setsid nohup "$VENV/python" -u "$REPO/scripts/camera_preview.py" --ip 127.0.0.1 --port "$PORT" \
         > "$RUN/preview.log" 2>&1 < /dev/null &
       echo $! > "$RUN/preview.pid"
       sleep 6
