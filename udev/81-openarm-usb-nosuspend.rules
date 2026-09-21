@@ -1,0 +1,14 @@
+# OpenArm カメラ系の USB 省電力を止める（2026-09-21・板橋）
+#
+# 症状: 新ハブ（GenesysLogic USB3.1 Hub 05e3:0626）配下の RealSense 3 台が、約 10 秒に 1 回・
+#       3 台同時に約 1.2 秒フリーズした（デバイス時刻の間隔で実測。フレーム番号は飛ばない）。
+# 原因: ハブの runtime suspend / リンク省電力。ハブの power/control を on にしたら
+#       最大間隔 33.5 ms・停止 0・30 fps に戻った（sysfs 手動で確認）。
+# 対策: ハブと RealSense（D435i 8086:0b3a / D405 8086:0b5b）を接続時に control=on に固定する。
+#       sysfs 手動設定は再起動・抜き差しで戻るので udev で永続化。
+# 導入: sudo cp udev/81-openarm-usb-nosuspend.rules /etc/udev/rules.d/ && sudo udevadm control --reload
+#       && sudo udevadm trigger --subsystem-match=usb --action=add
+# 確認: cat /sys/bus/usb/devices/<hub>/power/control  -> on
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="05e3", ATTR{idProduct}=="0626", TEST=="power/control", ATTR{power/control}="on"
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="8086", ATTR{idProduct}=="0b3a", TEST=="power/control", ATTR{power/control}="on"
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="8086", ATTR{idProduct}=="0b5b", TEST=="power/control", ATTR{power/control}="on"
