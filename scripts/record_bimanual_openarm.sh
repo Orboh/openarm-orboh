@@ -22,6 +22,9 @@
 #     bash scripts/record_bimanual_openarm.sh <scene-tag>
 #   WRIST_LEFT=true WRIST_LEFT_SERIAL=<serial> ... bash scripts/record_bimanual_openarm.sh <tag>  # 左 wrist 接続後
 #   NUM_EPISODES=1 DISPLAY_DATA=false bash scripts/record_bimanual_openarm.sh t                    # dry run
+#   RESUME=true REPO_ID=Orboh/bi_openarm_..._YYYYMMDD_HHMMSS DATASET_ROOT=$HOME/.cache/huggingface/lerobot/Orboh/bi_openarm_..._YYYYMMDD_HHMMSS \
+#     NUM_EPISODES=30 ... bash scripts/record_bimanual_openarm.sh <tag>   # 既存データセットへ追記(REPO_ID は stamp 後の実名・NUM_EPISODES は今回分)
+#   DISPLAY_DATA=true DISPLAY_IP=<手元PCのIP> DISPLAY_PORT=9876 ... bash scripts/record_bimanual_openarm.sh <tag>   # 手元 PC の rerun へ映像をストリーミング
 #
 # 1収集セッション = 1 run_dir: ~/collections/<UTC>-<scene-tag>/ に
 #   console.log / start-pose-bimanual.jsonl / manifest.json / command.sh が残る。
@@ -124,6 +127,35 @@ NUM_EPISODES="${NUM_EPISODES:-50}"
 EPISODE_TIME_S="${EPISODE_TIME_S:-20}"
 RESET_TIME_S="${RESET_TIME_S:-10}"
 DISPLAY_DATA="${DISPLAY_DATA:-true}"
+# 以下 3 点は単腕版の 2026-09-05 実機修正（Kota・Thor 作業ツリー）から移植:
+# RESUME=true で既存データセットに追記する(--dataset.resume 相当)。REPO_ID は前回
+# スタンプされた実際のローカル名(例: bi_openarm_..._YYYYMMDD_HHMMSS)を指定すること
+# ——stamp 前の名前だと別データセットとして新規作成されてしまう。resume() は
+# root=None(既定の Hub 用リビジョン安全キャッシュ)への書き込みを拒否するので、
+# DATASET_ROOT に実ディレクトリ(通常 $HF_LEROBOT_HOME/<REPO_ID>)を明示すること。
+# NUM_EPISODES は「今回追加で録る本数」(累計ではない)。
+RESUME="${RESUME:-false}"
+DATASET_ROOT="${DATASET_ROOT:-}"
+ROOT_ARGS=()
+if [ -n "$DATASET_ROOT" ]; then
+  ROOT_ARGS+=(--dataset.root="$DATASET_ROOT")
+fi
+if [ "$RESUME" = "true" ] && [ -z "$DATASET_ROOT" ]; then
+  echo "[record-bi] RESUME=true には DATASET_ROOT(既存データセットの実ディレクトリ)が必須。" >&2
+  exit 1
+fi
+# Thor 自身のローカル音声(spd-say)は既知のハング要因(2026-09-05 実機で "Stop recording" の
+# blocking=True 呼び出しが固まり、プロセスが応答しなくなった)。既定で OFF。
+PLAY_SOUNDS="${PLAY_SOUNDS:-false}"
+# 遠隔プレビュー: DISPLAY_IP/DISPLAY_PORT を指定すると Thor 側で rr.spawn() せず、
+# 起動済みの手元 PC の rerun ビューア(既定ポート 9876)へ映像を飛ばす。両方揃って
+# いなければ指定しない(DISPLAY_DATA=true と併用する)。
+DISPLAY_IP="${DISPLAY_IP:-}"
+DISPLAY_PORT="${DISPLAY_PORT:-}"
+DISPLAY_ARGS=()
+if [ -n "$DISPLAY_IP" ] && [ -n "$DISPLAY_PORT" ]; then
+  DISPLAY_ARGS+=(--display_ip="$DISPLAY_IP" --display_port="$DISPLAY_PORT")
+fi
 
 # ---- Start pose alignment (左右それぞれキャプチャ済みなら使う) -----------------
 LPOSE="$REPO/config/initial_pose_left.yaml"
@@ -357,7 +389,7 @@ fi
   echo "[record-bi] run_dir=$RUN_DIR  scene_tag=$TAG  ts_utc=$TS  host=$(hostname)"
   echo "[record-bi] follower=L:$FOLLOWER_L R:$FOLLOWER_R  leader=L:$LEADER_L R:$LEADER_R"
   echo "[record-bi] cameras=$CAMERAS"
-  echo "[record-bi] obs=$OBS  repo_id=$REPO_ID  episodes=$NUM_EPISODES  ${CAMERA_W}x${CAMERA_H}@${FPS}fps"
+  echo "[record-bi] obs=$OBS  repo_id=$REPO_ID  resume=$RESUME  root=${DATASET_ROOT:-<default>}  play_sounds=$PLAY_SOUNDS  episodes(this session)=$NUM_EPISODES  ${CAMERA_W}x${CAMERA_H}@${FPS}fps"
   echo "[record-bi] gravity_comp=$GRAVITY_COMP L=$LSCALE R=$RSCALE urdf=$GRAVITY_URDF"
   echo "[record-bi] episode_advance=$EPISODE_ADVANCE"
   if [ "$EPISODE_ADVANCE" = "manual" ]; then
@@ -436,6 +468,8 @@ COMMAND_SH="$RUN_DIR/command.sh"
   printf 'CAMERA_W=%q CAMERA_H=%q FPS=%q \\\n' "$CAMERA_W" "$CAMERA_H" "$FPS"
   printf 'NUM_EPISODES=%q EPISODE_TIME_S=%q RESET_TIME_S=%q \\\n' "$NUM_EPISODES" "$EPISODE_TIME_S" "$RESET_TIME_S"
   printf 'REPO_ID=%q \\\n' "$REPO_ID"
+  printf 'RESUME=%q DATASET_ROOT=%q \\\n' "$RESUME" "$DATASET_ROOT"
+  printf 'PLAY_SOUNDS=%q DISPLAY_IP=%q DISPLAY_PORT=%q \\\n' "$PLAY_SOUNDS" "$DISPLAY_IP" "$DISPLAY_PORT"
   printf 'TASK=%q \\\n' "$TASK"
   printf 'TASK_SLUG=%q \\\n' "$TASK_SLUG"
   printf 'GRAVITY_COMP=%q LSCALE=%q RSCALE=%q GRAVITY_URDF=%q \\\n' "$GRAVITY_COMP" "$LSCALE" "$RSCALE" "$GRAVITY_URDF"
@@ -475,7 +509,10 @@ set +e
   --teleop.left_arm_config.gravity_compensation="$GRAVITY_COMP" --teleop.left_arm_config.gravity_urdf_path="$GRAVITY_URDF" --teleop.left_arm_config.gravity_side=left --teleop.left_arm_config.gravity_scale="$LSCALE" \
   --teleop.right_arm_config.gravity_compensation="$GRAVITY_COMP" --teleop.right_arm_config.gravity_urdf_path="$GRAVITY_URDF" --teleop.right_arm_config.gravity_side=right --teleop.right_arm_config.gravity_scale="$RSCALE" \
   --display_data="$DISPLAY_DATA" \
-  --dataset.repo_id="$REPO_ID" --dataset.single_task="$TASK" --dataset.fps="$FPS" \
+  ${DISPLAY_ARGS[@]+"${DISPLAY_ARGS[@]}"} \
+  --resume="$RESUME" \
+  --play_sounds="$PLAY_SOUNDS" \
+  --dataset.repo_id="$REPO_ID" ${ROOT_ARGS[@]+"${ROOT_ARGS[@]}"} --dataset.single_task="$TASK" --dataset.fps="$FPS" \
   --dataset.num_episodes="$NUM_EPISODES" --dataset.episode_time_s="$EPISODE_TIME_S" --dataset.reset_time_s="$RESET_TIME_S" \
   --dataset.push_to_hub=false \
   ${POSE_ARGS[@]+"${POSE_ARGS[@]}"} \
