@@ -13,6 +13,10 @@
 ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="05e3", ATTR{idProduct}=="0626", TEST=="power/control", ATTR{power/control}="on"
 ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="8086", ATTR{idProduct}=="0b3a", TEST=="power/control", ATTR{power/control}="on"
 ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="8086", ATTR{idProduct}=="0b5b", TEST=="power/control", ATTR{power/control}="on"
+# PEAK PCAN-USB Pro FD（0c72:0011）と、その上流ハブ（Genesys 05e3:0610）も省電力を止める。
+# 2026-09-21 20:09: follower 箱の USB flap → tegra-xusb "HC died"（全 USB 消失）。flap の一因を潰す。
+ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="0c72", ATTR{idProduct}=="0011", TEST=="power/control", ATTR{power/control}="on"
+ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="05e3", ATTR{idProduct}=="0610", TEST=="power/control", ATTR{power/control}="on"
 # インタフェースが bind されたら親（usb_device）を on に戻す（uvcvideo が auto に戻した直後に上書き）
 ACTION=="bind|add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_interface", ATTRS{idVendor}=="8086", ATTRS{idProduct}=="0b3a", RUN+="/bin/sh -c 'echo on > /sys$devpath/../power/control'"
 ACTION=="bind|add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_interface", ATTRS{idVendor}=="8086", ATTRS{idProduct}=="0b5b", RUN+="/bin/sh -c 'echo on > /sys$devpath/../power/control'"

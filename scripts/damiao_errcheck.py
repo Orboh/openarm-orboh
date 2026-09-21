@@ -9,6 +9,8 @@ C=ロータ過熱 D=通信断 E=過負荷。byte6=MOS温度[C] byte7=ロータ�
 
 使い方:
   ~/projects/lerobot/.venv/bin/python scripts/damiao_errcheck.py can_fol_r [can_lead_r ...] [--seconds 2]
+  ... damiao_errcheck.py can_fol_r can_fol_l --clear                 # エラーのモータへクリア(0xFB)を送る（teleop 停止中）
+  ... damiao_errcheck.py x --clear-motor can_fol_r:joint_7            # 明示クリア（受信待ちなし）
 """
 from __future__ import annotations
 
@@ -28,8 +30,12 @@ def sniff(iface: str, seconds: float) -> dict:
 
     bus = can.Bus(channel=iface, interface="socketcan", fd=True)
     last: dict[int, tuple] = {}
+    worst: dict[int, tuple] = {}   # 観測中に見えたエラー状態（コード, 回数, 初出時刻[s]）
+    gaps: dict[int, float] = {}    # 観測中の最大フレーム間隔[ms]（応答が途切れた長さ）
+    seen_at: dict[int, float] = {}
     count = 0
-    t_end = time.monotonic() + seconds
+    t0 = time.monotonic()
+    t_end = t0 + seconds
     try:
         while time.monotonic() < t_end:
             msg = bus.recv(timeout=0.2)
@@ -37,17 +43,58 @@ def sniff(iface: str, seconds: float) -> dict:
                 continue
             count += 1
             b = msg.data
-            last[msg.arbitration_id] = (b[0] >> 4, b[6], b[7])
+            mid = msg.arbitration_id
+            now = time.monotonic()
+            st = b[0] >> 4
+            last[mid] = (st, b[6], b[7])
+            if st not in (0, 1):
+                c, n, t = worst.get(mid, (st, 0, now - t0))
+                worst[mid] = (st, n + 1, t)
+            if mid in seen_at:
+                gaps[mid] = max(gaps.get(mid, 0.0), (now - seen_at[mid]) * 1000)
+            seen_at[mid] = now
     finally:
         bus.shutdown()
-    return {"count": count, "last": last}
+    return {"count": count, "last": last, "worst": worst, "gaps": gaps}
+
+
+def clear_error(iface: str, mid: int) -> str:
+    """Damiao の「エラークリア」(data FF*7 + FB) を slave ID (= master ID - 0x10) に送り、応答の状態を返す。
+    2026-09-21 実機: ROTOR_OVERTEMP のラッチが電源再投入なしで disabled に戻った（右 J7・左 gripper）。
+    teleop が動いている間は送らない（指令と交錯する）。"""
+    import can
+
+    sid = mid - 0x10
+    bus = can.Bus(channel=iface, interface="socketcan", fd=True)
+    try:
+        bus.send(can.Message(arbitration_id=sid, data=bytes([0xFF] * 7 + [0xFB]), is_extended_id=False, is_fd=False))
+        t_end = time.monotonic() + 1.0
+        while time.monotonic() < t_end:
+            m = bus.recv(timeout=0.2)
+            if m and m.arbitration_id == mid and len(m.data) >= 8:
+                return STATE.get(m.data[0] >> 4, hex(m.data[0] >> 4))
+        return "no reply"
+    finally:
+        bus.shutdown()
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("ifaces", nargs="+")
     ap.add_argument("--seconds", type=float, default=2.0)
+    ap.add_argument("--clear", action="store_true", help="エラー状態のモータにクリア(0xFB)を送って解除を試みる（teleop 停止中に）")
+    ap.add_argument("--clear-motor", action="append", default=[], help="iface:joint_name を明示してクリア（例 can_fol_r:joint_7）")
     args = ap.parse_args()
+
+    if args.clear_motor:
+        rc = 0
+        for spec in args.clear_motor:
+            iface, jn = spec.split(":", 1)
+            mid = next((k for k, v in NAMES.items() if v == jn), None)
+            if mid is None:
+                print(f"unknown joint name: {jn}"); rc = 1; continue
+            print(f"clear {iface} {jn}: -> {clear_error(iface, mid)}")
+        return rc
     results = {}
     threads = [threading.Thread(target=lambda i=i: results.__setitem__(i, sniff(i, args.seconds))) for i in args.ifaces]
     for t in threads:
@@ -73,9 +120,15 @@ def main() -> int:
             st, tm, tr = r["last"][mid]
             label = STATE.get(st, f"code_{st:X}")
             flag = "" if st in (0, 1) else "  <-- ERROR LATCH（電源再投入でのみ解除）"
-            print(f"   {NAMES[mid]:8s} state={label:14s} Tmos={tm:3d}C Trotor={tr:3d}C{flag}")
-            if st not in (0, 1):
+            w = r["worst"].get(mid)
+            seen = f"  seen: {STATE.get(w[0], hex(w[0]))} x{w[1]} (first at {w[2]:.1f}s)" if w else ""
+            gap = r["gaps"].get(mid, 0.0)
+            gapflag = f"  max-gap={gap:.0f}ms" + ("  <-- 応答途切れ" if gap > 100 else "")
+            print(f"   {NAMES[mid]:8s} state={label:14s} Tmos={tm:3d}C Trotor={tr:3d}C{gapflag}{seen}{flag}")
+            if st not in (0, 1) or w or gap > 100:
                 rc = 1
+            if args.clear and st not in (0, 1):
+                print(f"            clear -> {clear_error(iface, mid)}")
     return rc
 
 
