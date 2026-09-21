@@ -23,7 +23,7 @@ if [ -f "$ENV_FILE" ]; then
   [ -n "${D405_EXPOSURE+x}" ] || D405_EXPOSURE="$(envdef D405_EXPOSURE)"
   [ -n "${D435_BRIGHTNESS+x}" ] || D435_BRIGHTNESS="$(envdef D435_BRIGHTNESS)"
 fi
-cam_setup_args(){ local a=(); [ -n "${D405_GAIN:-}" ] && a+=(--d405-gain "$D405_GAIN" --d405-exposure "${D405_EXPOSURE:-28000}"); [ -n "${D435_BRIGHTNESS:-}" ] && a+=(--d435-brightness "$D435_BRIGHTNESS"); printf "%s\n" "${a[@]}"; }
+cam_setup_args(){ local a=(); if [ -n "${D405_GAIN:-}" ]; then a+=(--d405-gain "$D405_GAIN" --d405-exposure "${D405_EXPOSURE:-28000}"); else a+=(--d405-auto); fi; [ -n "${D435_BRIGHTNESS:-}" ] && a+=(--d435-brightness "$D435_BRIGHTNESS"); printf "%s\n" "${a[@]}"; }
 
 viewer_pid(){ [ -f "$RUN/viewer.pid" ] && kill -0 "$(cat "$RUN/viewer.pid")" 2>/dev/null && cat "$RUN/viewer.pid"; }
 preview_pid(){ [ -f "$RUN/preview.pid" ] && kill -0 "$(cat "$RUN/preview.pid")" 2>/dev/null && cat "$RUN/preview.pid"; }

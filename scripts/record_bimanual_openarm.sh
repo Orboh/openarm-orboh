@@ -389,7 +389,7 @@ fi
   echo "[record-bi] run_dir=$RUN_DIR  scene_tag=$TAG  ts_utc=$TS  host=$(hostname)"
   echo "[record-bi] follower=L:$FOLLOWER_L R:$FOLLOWER_R  leader=L:$LEADER_L R:$LEADER_R"
   echo "[record-bi] cameras=$CAMERAS"
-  echo "[record-bi] d405: $( [ -n "${D405_GAIN:-}" ] && echo "manual exposure=${D405_EXPOSURE:-28000}us gain=$D405_GAIN（camera_setup.py で焼き済み）" || echo "auto exposure（既定・暗く出る既知）" )"
+  echo "[record-bi] d405: $( [ -n "${D405_GAIN:-}" ] && echo "manual exposure=${D405_EXPOSURE:-28000}us gain=$D405_GAIN（camera_setup.py で焼き済み）" || echo "auto exposure（既定。垂らし姿勢で床を見る向きだけ暗く出る）" )"
   echo "[record-bi] d435: auto exposure, brightness=${D435_BRIGHTNESS:-0}"
   echo "[record-bi] obs=$OBS  repo_id=$REPO_ID  resume=$RESUME  root=${DATASET_ROOT:-<default>}  play_sounds=$PLAY_SOUNDS  episodes(this session)=$NUM_EPISODES  ${CAMERA_W}x${CAMERA_H}@${FPS}fps"
   echo "[record-bi] gravity_comp=$GRAVITY_COMP L=$LSCALE R=$RSCALE urdf=$GRAVITY_URDF"
