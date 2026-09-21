@@ -46,6 +46,7 @@
 
 1. `bash scripts/calibrate_openarm.sh right bump_to_stop`(まず片側 follower から)
 2. 警告プロンプトで side 表記を確認(右腕に left シーケンスを流すと逆ストッパへ向かい危険)
+   ⚠ **一段目のプロンプトで空 ENTER を押すと「旧較正を使う」に落ちて無言で終わる**(`c` 以外の入力は全て旧較正扱い。08-04 と 09-21 の2回、leader で踏んだ)。成否の判定は出力の2行のどちらが出たか: `Captured homing offsets (deg): ...` が出れば較正済み、`Writing calibration file ... to the motors` だけなら旧較正のまま=やり直し
 3. 掃引順を目視確認(公式順のポート):
    J4(肘伸ばし・負方向) → J2 微動+J3(+90) → J4 を+90(前腕水平化) →
    J5(+90) → J6(+45) → J7(+90) → J2(下限) → J1(下限/上限) → J4 戻し

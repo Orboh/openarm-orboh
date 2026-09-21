@@ -76,10 +76,13 @@ bash scripts/run_teleop_remote_right.sh
 ```bash
 # Thor: X転送不要（素の ssh -t から）
 env -u DISPLAY -u WAYLAND_DISPLAY OPERATOR=<名前> SCENE=<scenes/のname> \
+  REPO_ID=Orboh/<dataset名> TASK="<このデータセットの言語指示>" \
   bash scripts/record_remote.sh <scene-tag>
 ```
 
-キー操作: 右矢印 = 次のエピソード開始 / `a` = 両腕を開始姿勢へ復帰 / 左矢印 = 直前のテイクを破棄 / `esc` = 収集終了。
+**`REPO_ID` と `TASK` は毎回明示する。** `record_pick_place_openarm.sh` の既定はオクラ用（`Orboh/openarm_okra_chest_wrist_v1`／"Pick up the okra and place it in the bin"）のままなので、省略すると別タスクの言語指示でデータセットが作られる（2026-09-19 に rollout 側で同型の取り違えが起きたため `scripts/g4/run_rollout.sh` は `--lang_instruction` を必須化済み。record 側は未必須化＝運用で守る）。
+
+キー操作: 右矢印 = 次のエピソード開始 / `a` = 両腕を開始姿勢へ復帰 / 左矢印 = 直前のテイクを破棄 / `esc` = 収集終了。**踏むと失うキー操作の罠3つ**（← は「Re-record」待機中に押すと録画が始まる／run 最後の1本は破棄猶予なし・1本録りに `NUM_EPISODES=1` は使わない／20秒打ち切りに達したテイクは捨てず保存）は操作者マニュアル `teleop-operator-manual.md` §4.1 に理由付きで書いてある。
 
 収集後、軽量メタ（`command.sh`/`manifest.json`/`console.log`/`ledger.csv` 等。データセット本体は含まない）を Vault へ回収する（Vault のある Vector/Mac 側で実行。Thor へ ssh して rsync するのでこのコマンド自体は Thor 上では打たない）:
 
@@ -88,6 +91,17 @@ bash scripts/pull_run.sh <UTC>-<scene-tag>
 ```
 
 Thor 側の openarm-orboh/lerobot の実配置がこのリポの前提（`~/projects/...`）と異なる場合は `THOR_OPENARM_DIR` / `THOR_LEROBOT_DIR` で上書きできる。
+
+### C. 収集したデータで学習する（GR00T）
+
+このリポは収集までを担当し、変換・学習・推論は **Vault の設計書が正本**。順に:
+
+1. 収集済みデータセットを HF へ push（`scripts/guard_push_target.py` で器の存在と token の write 権限を先に確認。HF の fine-grained token は**リポジトリ単位**なので新しいデータセット名ごとに web UI で器を作り token に write を足す）
+2. GR00T 本体は Orboh fork の名札ブランチから clone（NVIDIA の `23ace64`＝N1.7 と同一内容）: `git clone -b orboh-n1.7 https://github.com/Orboh/Isaac-GR00T.git ~/projects/Isaac-GR00T-n1.7`
+3. 身体設定をこのリポから配置: `GR00T_ROOT=~/projects/Isaac-GR00T-n1.7 bash scripts/install_gr00t_embodiment.sh`（`gr00t/README.md`）
+4. 変換（v3→v2）・FT・推論の確定コマンドと EC2 の使い方 → `~/Documents/orboh-company-vault/07Member's-free-space/Kento/02-Tech-Plan/02VLA/gr00t-openarm/gr00t-openarm-pipeline-design.md` §1.0（clone 一式）・§3（変換）・§4（学習・EC2）・§7（決定記録）
+
+bootstrap.sh が自動化しない学習側の人手項目: HF `nvidia/Cosmos-Reason2-2B` のゲート承認（本体モデルは非ゲートなので見落としやすい）／EC2 への IAM・SSM 経路／EC2 上の HF token（共有機なので他人の token を上書きしない）／アイドル自動停止 timer の存在確認。詳細は同設計書 §4.4・§4.5。
 
 ## 配置規約（契約）
 

@@ -6,7 +6,9 @@
 # 前提: start-collection-cameras.sh 稼働中・操作側PCで run_leader_agent_<side>.sh 稼働中。
 #
 # 使い方:
-#   OPERATOR=<名前> SCENE=<scenes/のname> bash scripts/record_remote.sh <scene-tag>   # 本番収集
+#   OPERATOR=<名前> SCENE=<scenes/のname> REPO_ID=Orboh/<dataset> TASK="<言語指示>" \
+#     bash scripts/record_remote.sh <scene-tag>                                    # 本番収集
+#   ※ REPO_ID/TASK を省略すると record_pick_place_openarm.sh の既定(オクラ用)で録られる
 #   CHECK=true bash scripts/record_remote.sh                                          # 起動チェック(2本15秒・tmpデータセット)
 # NUM_EPISODES / EPISODE_TIME_S / SIDE / REPO_ID 等は env でそのまま上書きできる
 # (中身は record_pick_place_openarm.sh なので変数の意味・ガードはそちらが正)。
