@@ -54,6 +54,8 @@
 
 ## 2. 収集の起動（Thor・`ssh -t thor` の素の端末で。`ssh -X` にしない）
 
+> 2026-09-21 追記: 長い env 列を貼らずに済む入口 `scripts/collect_bimanual.sh <dry|gate|session>` を追加した。固定値（TASK・TASK_SLUG・SCENE・OPERATOR・3 カメラのシリアル）は `config/bimanual-collect.env` に 1 回書く。以下の 2.2〜2.3 のコマンドはそれぞれ `bash scripts/collect_bimanual.sh dry`／`bash scripts/collect_bimanual.sh gate` で置き換えられる（左 wrist D405 `409122272149` を既定で含む＝3 眼。学習・推論側は `OPENARM_CAMERAS=chest,wrist_right,wrist_left` を揃える）。
+
 ### 2.1 物理と CAN の前提（毎セッション）
 
 1. フォロワー箱（22222222）とリーダー箱（44444444・倉庫箱を 09-21 に焼き直し済み）を両方接続し、`sudo bash ~/projects/openarm-orboh/scripts/canup.sh` で `can_fol_l / can_fol_r / can_lead_l / can_lead_r` の 4 本が UP・ERROR-ACTIVE。
