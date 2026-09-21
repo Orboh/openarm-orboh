@@ -60,6 +60,11 @@ case "$CMD" in
     if [ -n "$(preview_pid)" ]; then
       echo "[monitor] preview: already running (pid $(preview_pid))"
     else
+      # USB 省電力を止める（udev 81-openarm-usb-nosuspend.rules の保険。再列挙で auto に戻ることがある）
+      for _d in /sys/bus/usb/devices/*; do
+        [ -f "$_d/idVendor" ] || continue
+        case "$(cat "$_d/idVendor"):$(cat "$_d/idProduct")" in 05e3:0626|8086:0b3a|8086:0b5b) echo on | sudo -n tee "$_d/power/control" >/dev/null 2>&1 ;; esac
+      done
       # カメラを誰も掴んでいない今のうちに D405 の露出/ゲインを焼く（設定はデバイスに残る）
       mapfile -t _cs < <(cam_setup_args)
       if [ ${#_cs[@]} -gt 0 ]; then "$VENV/python" "$REPO/scripts/camera_setup.py" "${_cs[@]}" || echo "[monitor] camera_setup 失敗（続行）"; fi

@@ -66,6 +66,11 @@ export WRIST_RIGHT="${WRIST_RIGHT:-true}" WRIST_RIGHT_SERIAL WRIST_LEFT WRIST_LE
 echo "[collect-bi] mode=$MODE tag=$TAG episodes=$NUM_EPISODES scene=$SCENE task='$TASK' cams=chest+$( [ "$WRIST_RIGHT" = true ] && printf 'wrist_right' )$( [ "$WRIST_LEFT" = true ] && printf '+wrist_left' ) repo_id=${REPO_ID:-<auto>}"
 # RealSense は SDK 直読が排他: モニター用プレビューが動いていれば止める。次いで D405 の露出/ゲインを焼く
 bash "$REPO/scripts/preview_on_monitor.sh" stop-preview >/dev/null 2>&1 || true
+# USB 省電力を止める（udev ルールの保険。再列挙で auto に戻ることがある）
+for _d in /sys/bus/usb/devices/*; do
+  [ -f "$_d/idVendor" ] || continue
+  case "$(cat "$_d/idVendor"):$(cat "$_d/idProduct")" in 05e3:0626|8086:0b3a|8086:0b5b) echo on | sudo -n tee "$_d/power/control" >/dev/null 2>&1 ;; esac
+done
 _cs=()
 if [ -n "${D405_GAIN:-}" ]; then _cs+=(--d405-gain "$D405_GAIN" --d405-exposure "${D405_EXPOSURE:-28000}"); else _cs+=(--d405-auto); fi   # 空なら前セッションの手動値を自動露出へ戻す
 [ -n "${D435_BRIGHTNESS:-}" ] && _cs+=(--d435-brightness "$D435_BRIGHTNESS")
