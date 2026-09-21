@@ -45,6 +45,18 @@ def setopt(s, opt, v):
     return False
 
 
+def getopt(s, opt, default=-1.0):
+    # get_option も USB の一時エラー（RS2_USB_STATUS_PIPE）で落ちることがある。数回試して駄目なら default
+    if not s.supports(opt):
+        return default
+    for _ in range(6):
+        try:
+            return s.get_option(opt)
+        except RuntimeError:
+            time.sleep(0.3)
+    return default
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--show", action="store_true")
@@ -85,10 +97,10 @@ def main() -> int:
             ok = setopt(s, rs.option.gain, 16.0)
             ok &= setopt(s, rs.option.enable_auto_exposure, 1)
             rc |= 0 if ok else 1
-        ae = s.get_option(rs.option.enable_auto_exposure) if s.supports(rs.option.enable_auto_exposure) else -1
-        ex = s.get_option(rs.option.exposure) if s.supports(rs.option.exposure) else -1
-        g = s.get_option(rs.option.gain) if s.supports(rs.option.gain) else -1
-        br = s.get_option(rs.option.brightness) if s.supports(rs.option.brightness) else None
+        ae = getopt(s, rs.option.enable_auto_exposure)
+        ex = getopt(s, rs.option.exposure)
+        g = getopt(s, rs.option.gain)
+        br = getopt(s, rs.option.brightness, None) if s.supports(rs.option.brightness) else None
         extra = f" brightness={br:g}" if br is not None else ""
         print(f"[camera-setup] {name.replace('Intel RealSense ', ''):8s} {serial}: auto_exposure={ae:g} exposure={ex:g} gain={g:g}{extra}")
     return rc
