@@ -58,6 +58,8 @@
 
 ### 2.1 物理と CAN の前提（毎セッション）
 
+> 2026-09-21 追記（3 眼・モニター・カメラ設定・USB）: (a) 左 wrist D405 `409122272149` を追加し 3 眼が既定（`config/bimanual-collect.env`）。(b) モニター表示は `bash scripts/preview_on_monitor.sh start`（rerun ビューア :9876 常駐＋3 眼プレビュー）。collect は起動時にプレビューを自動停止し、`DISPLAY_DATA=true DISPLAY_IP=127.0.0.1 DISPLAY_PORT=9876` を付ければ同じ画面に record の映像が出る。(c) カメラ設定は起動時に `camera_setup.py` で焼く（D405 露出 28 ms・ゲイン 200／D435i brightness 24。USB 抜き差し・電源断で戻る）。(d) 新ハブの USB 省電力で 3 台同時に約 1.2 秒止まる問題は udev `81-openarm-usb-nosuspend.rules`（Thor 導入済み）で解消。別マシンに繋ぎ替えたら同ルールを入れる。
+
 1. フォロワー箱（22222222）とリーダー箱（44444444・倉庫箱を 09-21 に焼き直し済み）を両方接続し、`sudo bash ~/projects/openarm-orboh/scripts/canup.sh` で `can_fol_l / can_fol_r / can_lead_l / can_lead_r` の 4 本が UP・ERROR-ACTIVE。
 2. `~/projects/lerobot/.venv/bin/python ~/projects/openarm-orboh/scripts/openarm_motorcheck.py` で 4 腕 32 モータ応答。**全行 0.0000 で [OK] が出るのは偽 OK**（未給電・無応答）。`drops [none]` を確認するまで動かさない。
 3. カメラ: `rs-enumerate-devices | grep -i serial` で chest D435i `344422070898` と wrist D405 `352122273417`（板橋個体）が見える。Thor の元の USB-C は使わない（ホスト非対応）。
