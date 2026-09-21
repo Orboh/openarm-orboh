@@ -32,6 +32,7 @@ def sniff(iface: str, seconds: float) -> dict:
     last: dict[int, tuple] = {}
     worst: dict[int, tuple] = {}   # 観測中に見えたエラー状態（コード, 回数, 初出時刻[s]）
     gaps: dict[int, float] = {}    # 観測中の最大フレーム間隔[ms]（応答が途切れた長さ）
+    peak: dict[int, tuple] = {}    # 観測中の最高温度 (Tmos, Trotor)。ラッチは推定コイル温度の瞬間値で起きるので、ピークが証拠になる
     seen_at: dict[int, float] = {}
     count = 0
     t0 = time.monotonic()
@@ -47,15 +48,17 @@ def sniff(iface: str, seconds: float) -> dict:
             now = time.monotonic()
             st = b[0] >> 4
             last[mid] = (st, b[6], b[7])
+            pk = peak.get(mid, (0, 0))
+            peak[mid] = (max(pk[0], b[6]), max(pk[1], b[7]))
             if st not in (0, 1):
-                c, n, t = worst.get(mid, (st, 0, now - t0))
-                worst[mid] = (st, n + 1, t)
+                c, n, t, tm0, tr0 = worst.get(mid, (st, 0, now - t0, b[6], b[7]))
+                worst[mid] = (st, n + 1, t, tm0, tr0)
             if mid in seen_at:
                 gaps[mid] = max(gaps.get(mid, 0.0), (now - seen_at[mid]) * 1000)
             seen_at[mid] = now
     finally:
         bus.shutdown()
-    return {"count": count, "last": last, "worst": worst, "gaps": gaps}
+    return {"count": count, "last": last, "worst": worst, "gaps": gaps, "peak": peak}
 
 
 def clear_error(iface: str, mid: int) -> str:
@@ -121,10 +124,12 @@ def main() -> int:
             label = STATE.get(st, f"code_{st:X}")
             flag = "" if st in (0, 1) else "  <-- ERROR LATCH（電源再投入でのみ解除）"
             w = r["worst"].get(mid)
-            seen = f"  seen: {STATE.get(w[0], hex(w[0]))} x{w[1]} (first at {w[2]:.1f}s)" if w else ""
+            seen = f"  seen: {STATE.get(w[0], hex(w[0]))} x{w[1]} (first at {w[2]:.1f}s, then Tmos={w[3]}C Trotor={w[4]}C)" if w else ""
+            pk = r["peak"].get(mid, (0, 0))
+            gapflag_peak = f"  peak Tmos/Trotor={pk[0]}/{pk[1]}C"
             gap = r["gaps"].get(mid, 0.0)
             gapflag = f"  max-gap={gap:.0f}ms" + ("  <-- 応答途切れ" if gap > 100 else "")
-            print(f"   {NAMES[mid]:8s} state={label:14s} Tmos={tm:3d}C Trotor={tr:3d}C{gapflag}{seen}{flag}")
+            print(f"   {NAMES[mid]:8s} state={label:14s} Tmos={tm:3d}C Trotor={tr:3d}C{gapflag_peak}{gapflag}{seen}{flag}")
             if st not in (0, 1) or w or gap > 100:
                 rc = 1
             if args.clear and st not in (0, 1):
