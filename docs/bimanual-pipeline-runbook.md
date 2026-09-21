@@ -62,6 +62,7 @@
 
 1. フォロワー箱（22222222）とリーダー箱（44444444・倉庫箱を 09-21 に焼き直し済み）を両方接続し、`sudo bash ~/projects/openarm-orboh/scripts/canup.sh` で `can_fol_l / can_fol_r / can_lead_l / can_lead_r` の 4 本が UP・ERROR-ACTIVE。
 2. `~/projects/lerobot/.venv/bin/python ~/projects/openarm-orboh/scripts/openarm_motorcheck.py` で 4 腕 32 モータ応答。**全行 0.0000 で [OK] が出るのは偽 OK**（未給電・無応答）。`drops [none]` を確認するまで動かさない。
+   - LED 赤点滅を見たら（teleop 稼働中でも安全）`~/projects/lerobot/.venv/bin/python scripts/damiao_errcheck.py can_fol_r can_fol_l can_lead_r can_lead_l --seconds 3` で種類を確定（0xC＝コイル過温）し、teleop を Ctrl-C で止めてから `... --clear` で解除（電源再投入不要。0x9 低電圧/0xD 通信断は原因除去が先）。記録を取るなら先に `scripts/damiao_feedback_log.py` を並走させる
 3. カメラ: `rs-enumerate-devices | grep -i serial` で chest D435i `344422070898` と wrist D405 `352122273417`（板橋個体）が見える。Thor の元の USB-C は使わない（ホスト非対応）。
 4. シーン YAML: 板橋用を新設する。`cp scenes/_TEMPLATE.yaml scenes/itabashi-desk-v1.yaml`（名前は例。英数ハイフン）を作り、実機の前で TODO を全部埋める。TODO が残ると起動が止まる（dry run だけ `ALLOW_TODO_SCENE=true` で通せるが本番では使わない。Kota の tape は todo_count=40 のまま録られて条件が辿れなくなった）。
 5. 板橋の机高さ・かご位置は 09-19 の devlog に「アーム机約 710・昇降表示 89・相対 +180mm」の実測があるので出発点にする。

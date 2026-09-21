@@ -7,6 +7,10 @@
 # 前提: lerobot venv は ~/projects/lerobot/.venv（Vector/Thor 共通）。URDF はリポ相対参照。
 LSCALE="${1:-1.2}"
 RSCALE="${2:-$LSCALE}"
+# 3 番目以降の引数は lerobot-teleoperate へそのまま渡す（例: グリッパの kp を下げる
+#   --robot.left_arm_config.position_kp=[240,240,240,240,24,31,25,10] --robot.right_arm_config.position_kp=[...]
+#   2026-09-21: 木材把持で follower gripper がコイル過温ラッチ（kp 25 で握り込み→ストール電流）。kp を下げて飽和トルクを抑える）
+EXTRA_ARGS=("${@:3}")
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 URDF="$REPO/urdf/openarm_v10_bimanual.urdf"
 BIN="$HOME/projects/lerobot/.venv/bin/lerobot-teleoperate"
@@ -37,4 +41,5 @@ POSE_ARGS=()
   --teleop.right_arm_config.gravity_scale="$RSCALE" \
   --teleop.right_arm_config.use_velocity_and_torque=true \
   --fps=200 \
-  "${POSE_ARGS[@]}"
+  "${POSE_ARGS[@]}" \
+  ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}
