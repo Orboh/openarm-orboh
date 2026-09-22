@@ -1,0 +1,92 @@
+# 板橋 両腕（3 眼）積み木シーン v1 —— 2026-09-22 起草（Claude・Kento 実測待ち）
+#
+# 物理配置の宣言。ソフトの挙動は変えない。SCENE=itabashi-blockstack-v1 で収集を起動すると
+# このファイルの sha が manifest.json に焼かれる。**1 本でも録った後は書き換えず -v2 を作る。**
+# TODO は実機の前で巻き尺で埋める（残数は `python scripts/collect_manifest.py check-scene --scene-path scenes/itabashi-blockstack-v1.yaml`）。
+# 設定ダンプに出るもの（腕・fps・カメラ製造番号・解像度・重力補償・commit・較正 sha）はここに書かない。
+
+name: itabashi-blockstack-v1
+created: 2026-09-22
+measured: TODO              # 実測値を入れた日
+task: blockstack            # TASK="Stack the wooden blocks using both arms"
+note: >
+  板橋の OpenArm 両腕（chest D435i + 左右 wrist D405 の 3 眼）で「両腕で積み木を積む」を録る。
+  収集者 Kento。較正フレームは 2026-09-21〜22 の bump-to-stop 版（左 leader は 09-22 11:42 の 3 回目）で、
+  08-04 右フレームで録った bottle v2 / tape v1 とは混ぜない（判別は manifest の較正 sha）。
+
+# --- 机 ---------------------------------------------------------------------
+table:
+  kind: TODO                # height_adjustable / fixed
+  height_mm: TODO           # 床から天板まで（実測）
+  desk_preset: TODO         # 昇降テーブルでなければ null
+  surface: TODO             # 天板の材質と色
+  base_to_table_edge_mm: TODO   # 底板の先端から天板の縁まで（クランプ幅など測り直せる関係で）
+  base_mount: TODO          # 固定方法（クランプ／ボルト／置くだけ）
+
+mat:
+  present: TODO             # true / false
+  kind: TODO                # 敷かないなら null
+  orientation: TODO
+
+lighting:
+  source: TODO              # 例: 施設の常設照明のみ・追加光源なし
+  window: TODO              # 窓の有無・遮光・直射日光が入るか
+  daylight_controlled: false
+  daylight_recorded_at: "session layer（manifest.identity.started_local / notes.md の lighting_observed）"
+  note: TODO
+
+# --- 対象物 -----------------------------------------------------------------
+object:
+  kind: wooden_block
+  count: TODO               # 1 エピソードで積む個数
+  description: TODO         # 1 辺の mm・色・材質・表面（塗装／無垢）・個体差の有無
+  fill: solid               # 中身なし（無垢材）
+  orientation: TODO         # 向きを固定するか散らすか
+  condition: 劣化しない前提・同一セットで通す（欠け／汚れが出たら notes.md）
+
+place_target:
+  kind: TODO                # 積む場所（マーク／台／無し）
+  position: TODO            # 積む位置（机の直交 2 辺からの mm）
+  position_origin: TODO     # どの 2 辺から測ったか
+  markers: TODO             # 目印の有無と、カメラの画角に入るか
+  size_mm: TODO
+
+# --- 散らし方 ---------------------------------------------------------------
+scatter_policy:
+  mode: TODO                # coarse_grid / grid / fixed / rough_area
+  layout: TODO              # 例: 左右それぞれ 2x2
+  cells: TODO
+  strict: false
+  placement: TODO           # 枠をどこに取るか（左腕側／右腕側）
+  numbering: TODO           # どの位置が 0 か
+  reference_mark: TODO
+  reference_mark_position_mm: TODO
+  reference_mark_origin: TODO
+  reference_mark_in_camera_view: TODO
+  marking: TODO             # visual_only / tape_reference_only / tape_reference_low_contrast
+  cell_size_mm: TODO
+  area_mm: TODO             # 狭いほど学習は通り、汎化はその範囲に限られる
+  per_session: TODO         # 1 セッションで各セル何本
+  session_count: TODO
+  intentional_imbalance: TODO
+
+distractors:
+  present: TODO
+  items: []
+
+# --- カメラの物理位置 -------------------------------------------------------
+camera_mount:
+  chest:
+    height_mm: TODO
+    height_ref: TODO        # レンズ中心か取り付け部か・何からの高さか
+    tilt_deg: TODO          # 目分量でよい・下向き
+    mount_part: TODO        # 既製マウントなら部品名
+    view_note: TODO         # 散らす範囲・積む場所・目印・両腕の到達性が画角に入るか
+  wrist_right:
+    mount_part: TODO        # D405 の手首マウント部品名
+    orientation: TODO       # 把持器に対する向き（指先が写るか）
+    view_note: TODO
+  wrist_left:
+    mount_part: TODO
+    orientation: TODO
+    view_note: TODO

@@ -2,6 +2,7 @@
 # Thor のモニターに rerun ビューアを常駐させ、3 眼プレビュー（camera_preview.py）を流す/止める。
 #
 #   bash scripts/preview_on_monitor.sh start          # ビューア(無ければ起動) + プレビュー開始
+#   bash scripts/preview_on_monitor.sh start-viewer   # ビューアだけ起動（record が映像を流す先。collect_bimanual.sh が自動で呼ぶ・2026-09-22）
 #   bash scripts/preview_on_monitor.sh stop-preview   # プレビューだけ止める（record を起動する前に必ず）
 #   bash scripts/preview_on_monitor.sh stop           # 両方止める
 #   bash scripts/preview_on_monitor.sh status
@@ -40,23 +41,29 @@ detect_display(){
   DISPLAY_D="${DISPLAY:-${DISPLAY_D:-}}"; XAUTH_D="${XAUTHORITY:-${XAUTH_D:-}}"
 }
 
+ensure_viewer(){
+  # rerun ビューアが :$PORT で待っていなければデスクトップに起動する（プレビューは起動しない）。
+  # record（lerobot-record --display_ip 127.0.0.1 --display_port $PORT）はこのビューアへ 3 眼と関節値を流す。
+  if port_open; then
+    echo "[monitor] viewer: already listening on :$PORT (pid $(viewer_pid 2>/dev/null || echo '?'))"
+  else
+    detect_display
+    [ -n "$DISPLAY_D" ] || { echo "[monitor] デスクトップにログインしていない（gnome-shell 無し）。モニターでログインしてから。" >&2; return 1; }
+    DISPLAY="$DISPLAY_D" XAUTHORITY="$XAUTH_D" setsid nohup "$VENV/rerun" --port "$PORT" --memory-limit 2GB \
+      > "$RUN/viewer.log" 2>&1 < /dev/null &
+    echo $! > "$RUN/viewer.pid"
+    for _ in 1 2 3 4 5 6 7 8 9 10; do sleep 1; port_open && break; done
+    port_open && echo "[monitor] viewer: started on DISPLAY=$DISPLAY_D, listening :$PORT (pid $(cat "$RUN/viewer.pid"))" \
+              || { echo "[monitor] viewer が :$PORT で待受しない。log:"; tail -5 "$RUN/viewer.log"; return 1; }
+  fi
+  # モニターの暗転防止（X の DPMS とスクリーンセーバ。X セッション毎にリセットされるので毎回）
+  detect_display
+  if [ -n "${DISPLAY_D:-}" ]; then DISPLAY="$DISPLAY_D" XAUTHORITY="$XAUTH_D" xset s off -dpms 2>/dev/null && echo "[monitor] dpms/screensaver off on $DISPLAY_D"; fi
+}
+
 case "$CMD" in
   start)
-    if port_open; then
-      echo "[monitor] viewer: already listening on :$PORT (pid $(viewer_pid 2>/dev/null || echo '?'))"
-    else
-      detect_display
-      [ -n "$DISPLAY_D" ] || { echo "[monitor] デスクトップにログインしていない（gnome-shell 無し）。モニターでログインしてから。" >&2; exit 1; }
-      DISPLAY="$DISPLAY_D" XAUTHORITY="$XAUTH_D" setsid nohup "$VENV/rerun" --port "$PORT" --memory-limit 2GB \
-        > "$RUN/viewer.log" 2>&1 < /dev/null &
-      echo $! > "$RUN/viewer.pid"
-      for _ in 1 2 3 4 5 6 7 8 9 10; do sleep 1; port_open && break; done
-      port_open && echo "[monitor] viewer: started on DISPLAY=$DISPLAY_D, listening :$PORT (pid $(cat "$RUN/viewer.pid"))" \
-                || { echo "[monitor] viewer が :$PORT で待受しない。log:"; tail -5 "$RUN/viewer.log"; exit 1; }
-    fi
-    # モニターの暗転防止（X の DPMS とスクリーンセーバ。X セッション毎にリセットされるので毎回）
-    detect_display
-    if [ -n "${DISPLAY_D:-}" ]; then DISPLAY="$DISPLAY_D" XAUTHORITY="$XAUTH_D" xset s off -dpms 2>/dev/null && echo "[monitor] dpms/screensaver off on $DISPLAY_D"; fi
+    ensure_viewer || exit 1
     if [ -n "$(preview_pid)" ]; then
       echo "[monitor] preview: already running (pid $(preview_pid))"
     else
@@ -77,6 +84,9 @@ case "$CMD" in
     fi
     tail -3 "$RUN/preview.log"
     ;;
+  start-viewer)
+    ensure_viewer
+    ;;
   stop-preview)
     p="$(preview_pid)"; if [ -n "$p" ]; then kill -INT "$p"; sleep 2; kill -0 "$p" 2>/dev/null && kill "$p"; echo "[monitor] preview: stopped"; else echo "[monitor] preview: not running"; fi
     rm -f "$RUN/preview.pid"
@@ -91,5 +101,5 @@ case "$CMD" in
     echo "[monitor] preview: pid=$(preview_pid || echo -)"
     [ -f "$RUN/preview.log" ] && tail -2 "$RUN/preview.log"
     ;;
-  *) echo "usage: $0 start|stop-preview|stop|status" >&2; exit 1 ;;
+  *) echo "usage: $0 start|start-viewer|stop-preview|stop|status" >&2; exit 1 ;;
 esac

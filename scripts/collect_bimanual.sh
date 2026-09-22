@@ -4,11 +4,12 @@
 # 本体は scripts/record_bimanual_openarm.sh（運用契約・ゲート・manifest はそちら）。
 #
 # 使い方（Thor・~/projects/openarm-orboh で）:
-#   bash scripts/collect_bimanual.sh dry                 # 2 本・捨て名・SCENE=none・表示なし（配管と 'a' キーの確認）
+#   bash scripts/collect_bimanual.sh dry                 # 2 本・捨て名・SCENE=none（配管と 'a' キーの確認）
 #   bash scripts/collect_bimanual.sh gate                # 受入ゲート 10 本（タグ <slug>-v1-s1）→ 止めて検査
 #   bash scripts/collect_bimanual.sh session s2 [10]     # 続きのセッション（タグ <slug>-v1-s2・本数既定 10）
 #   RESUME=true DATASET_ROOT=... bash scripts/collect_bimanual.sh session s2   # 既存データセットへ追記（本体の契約どおり）
 #   DISPLAY_IP=<手元PC> DISPLAY_PORT=9876 bash scripts/collect_bimanual.sh gate # 手元の rerun へ映像を飛ばす
+#   MONITOR=off bash scripts/collect_bimanual.sh gate      # record 中の映像をモニターに出さない（既定は on＝Thor のビューア :9876 へ 3 眼と関節値を流す・2026-09-22 Kento）
 #   GRIPPER_KP=12 bash scripts/collect_bimanual.sh gate      # follower gripper の kp を下げる(熱対策・2026-09-21。env に書いてもよい)
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
@@ -43,28 +44,45 @@ fi
 case "$MODE" in
   dry)
     SUFFIX="dry"; NUM="${3:-${2:-2}}"
-    export SCENE=none NUM_EPISODES="$NUM" DISPLAY_DATA="${DISPLAY_DATA:-false}"
+    export SCENE=none NUM_EPISODES="$NUM"
     # 捨て名（データ標準 §4: _test_<unixtime>）。本体の repo_id 自動組立を上書きする
     OBS=chest; [ "${WRIST_RIGHT:-true}" = "true" ] && OBS="${OBS}_wristr"; [ "${WRIST_LEFT:-false}" = "true" ] && OBS="${OBS}_wristl"
     export REPO_ID="Orboh/bi_openarm_${TASK_SLUG}_${OBS}_test_$(date +%s)"
     ;;
   gate)
     SUFFIX="v1-s1"; NUM="${2:-10}"
-    export NUM_EPISODES="$NUM" DISPLAY_DATA="${DISPLAY_DATA:-false}"
+    export NUM_EPISODES="$NUM"
     ;;
   session)
     [ -n "${2:-}" ] || { echo "[collect-bi] session にはタグ接尾辞（例 s2）が要る" >&2; exit 1; }
     SUFFIX="v1-$2"; NUM="${3:-10}"
-    export NUM_EPISODES="$NUM" DISPLAY_DATA="${DISPLAY_DATA:-false}"
+    export NUM_EPISODES="$NUM"
     ;;
 esac
 TAG="bi-${TASK_SLUG}-${SUFFIX}"
+
+# record 中の映像出力（2026-09-22 Kento 決定: 既定オン）。record 自身が Thor のビューア（rerun :9876）へ
+# 3 眼と関節値を流す。プレビュー用プロセスとは RealSense が排他なので、下でプレビューを止めビューアだけ確保する。
+#   MONITOR=off          → 流さない（DISPLAY_DATA=false）
+#   DISPLAY_IP=<手元PC>  → 手元 PC の rerun へ（従来どおり・MONITOR より優先）
+MONITOR="${MONITOR:-on}"
+MON_PORT="${DISPLAY_PORT:-9876}"
+if [ -n "${DISPLAY_IP:-}" ]; then
+  export DISPLAY_DATA=true DISPLAY_PORT="$MON_PORT"; MON_NOTE="remote(${DISPLAY_IP}:${MON_PORT})"
+elif [ "$MONITOR" = "off" ] || [ "${DISPLAY_DATA:-}" = "false" ]; then
+  export DISPLAY_DATA=false; unset DISPLAY_IP DISPLAY_PORT; MON_NOTE="off"
+elif PORT="$MON_PORT" bash "$REPO/scripts/preview_on_monitor.sh" start-viewer; then
+  export DISPLAY_DATA=true DISPLAY_IP=127.0.0.1 DISPLAY_PORT="$MON_PORT"; MON_NOTE="on(127.0.0.1:${MON_PORT})"
+else
+  echo "[collect-bi] ビューアを起動できないので映像出力なしで続ける（MONITOR=off と同じ）" >&2
+  export DISPLAY_DATA=false; unset DISPLAY_IP DISPLAY_PORT; MON_NOTE="off(viewer unavailable)"
+fi
 
 export OPERATOR TASK TASK_SLUG EPISODE_TIME_S LSCALE RSCALE
 export CAM_SERIAL="${CHEST_SERIAL:-344422070898}"
 export WRIST_RIGHT="${WRIST_RIGHT:-true}" WRIST_RIGHT_SERIAL WRIST_LEFT WRIST_LEFT_SERIAL
 
-echo "[collect-bi] mode=$MODE tag=$TAG episodes=$NUM_EPISODES scene=$SCENE task='$TASK' cams=chest+$( [ "$WRIST_RIGHT" = true ] && printf 'wrist_right' )$( [ "$WRIST_LEFT" = true ] && printf '+wrist_left' ) repo_id=${REPO_ID:-<auto>}"
+echo "[collect-bi] mode=$MODE tag=$TAG episodes=$NUM_EPISODES scene=$SCENE task='$TASK' cams=chest+$( [ "$WRIST_RIGHT" = true ] && printf 'wrist_right' )$( [ "$WRIST_LEFT" = true ] && printf '+wrist_left' ) repo_id=${REPO_ID:-<auto>} monitor=$MON_NOTE"
 # RealSense は SDK 直読が排他: モニター用プレビューが動いていれば止める。次いで D405 の露出/ゲインを焼く
 bash "$REPO/scripts/preview_on_monitor.sh" stop-preview >/dev/null 2>&1 || true
 # USB 省電力を止める（udev ルールの保険。再列挙で auto に戻ることがある）
