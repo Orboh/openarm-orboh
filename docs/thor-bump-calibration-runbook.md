@@ -87,6 +87,9 @@ lerobot-calibrate --robot.type=openarm_follower --robot.port=can_fol_r \
 
 ## 4. per-unit ストッパ角(MECH_LIM)の検証と上書き
 
+> **2026-09-22 追記（必読）**: bump-to-stop は **1 関節だけ誤検知して 30° 級の零点ずれを残すことがある**。実例＝2026-09-21 15:34 の leader_left で J5 のストッパ検知が 36° 手前で止まり（homing_offset +28.37°・正しくは −7.63°）、翌朝の両腕 teleop で左 leader だけ前腕がねじれて整列した（follower は正常＝YAML でなく較正）。leader だけ bump をやり直して解消。**較正直後に必ず下の §4 の検算（垂らし読みで >10° 警告が無いこと）と §7 の leader/follower 開始一致を見る。**J5〜J7 は前腕水平で bump するため重力/摩擦トルクで誤検知しやすい（§3 の torque しきい値を上げる調整対象）。leader だけやり直す場合は `lerobot-calibrate --teleop.type=openarm_leader --teleop.port=can_lead_<l|r> --teleop.id=leader_<left|right> --teleop.calibration_anchor=bump_to_stop --teleop.gravity_side=<left|right> --teleop.rezero_on_connect=false --teleop.align_on_connect=false`（`calibrate_openarm.sh` は follower→leader を続けて回す）。
+
+
 公称値(URDF リミット準拠、右): J1 -80 / J2 -10 / J3 +90 / J4 0 / J5 +90 / J6 +45 / J7 +90 deg
 (左は J1 +80 / J2 +10、他は同じ)。個体の組付け公差でズレるため、較正後に検証する:
 
