@@ -13,6 +13,7 @@
 #   GRIPPER_KP=12 bash scripts/collect_bimanual.sh gate      # follower gripper の kp を下げる(熱対策・2026-09-21。env に書いてもよい)
 #   DISPLAY_SCALE=1 DISPLAY_JPEG_QUALITY=95 bash scripts/collect_bimanual.sh gate   # 表示用画像を間引かず原寸・q95 で流す（既定は 1/2・q60。表示のみ、データは無関係）
 #   DISPLAY_STRIDE=3 bash scripts/collect_bimanual.sh gate   # 表示用画像を 3 フレームに 1 回だけ流す（関節値は毎フレーム）
+#   VIEWER_KEEP=true bash scripts/collect_bimanual.sh gate   # 起動時にビューアを作り直さない（既定は作り直す＝古い recording が前面に残って映像が止まって見える事故の防止・2026-09-22）
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 ENV_FILE="${ENV_FILE:-$REPO/config/bimanual-collect.env}"
@@ -73,8 +74,11 @@ if [ -n "${DISPLAY_IP:-}" ]; then
   export DISPLAY_DATA=true DISPLAY_PORT="$MON_PORT"; MON_NOTE="remote(${DISPLAY_IP}:${MON_PORT})"
 elif [ "$MONITOR" = "off" ] || [ "${DISPLAY_DATA:-}" = "false" ]; then
   export DISPLAY_DATA=false; unset DISPLAY_IP DISPLAY_PORT; MON_NOTE="off"
-elif PORT="$MON_PORT" bash "$REPO/scripts/preview_on_monitor.sh" start-viewer; then
-  export DISPLAY_DATA=true DISPLAY_IP=127.0.0.1 DISPLAY_PORT="$MON_PORT"; MON_NOTE="on(127.0.0.1:${MON_PORT})"
+elif PORT="$MON_PORT" bash "$REPO/scripts/preview_on_monitor.sh" "$( [ "${VIEWER_KEEP:-false}" = "true" ] && echo start-viewer || echo restart-viewer )"; then
+  # ビューアは起動ごとに作り直す（restart-viewer）。rerun は最後に届いた recording を前面に出すので、前の run や
+  # テストの recording が残っていると record の映像が裏に入る（2026-09-22 gate 中に 3 回「モニターが止まった」）。
+  # record 側の recording id も固定して（LEROBOT_RERUN_RECORDING_ID）、同じビューア内で run が増えないようにする。
+  export DISPLAY_DATA=true DISPLAY_IP=127.0.0.1 DISPLAY_PORT="$MON_PORT" LEROBOT_RERUN_RECORDING_ID="${DISPLAY_RECORDING_ID:-openarm-record}"; MON_NOTE="on(127.0.0.1:${MON_PORT})"
 else
   echo "[collect-bi] ビューアを起動できないので映像出力なしで続ける（MONITOR=off と同じ）" >&2
   export DISPLAY_DATA=false; unset DISPLAY_IP DISPLAY_PORT; MON_NOTE="off(viewer unavailable)"

@@ -87,6 +87,13 @@ case "$CMD" in
   start-viewer)
     ensure_viewer
     ;;
+  restart-viewer)
+    # ビューアを作り直す（2026-09-22）。rerun ビューアは「最後に届いた recording」を前面に出し、record は起動ごとに
+    # 新しい recording を作るので、古い run やテストの recording が前面に残ると新しい映像が裏に入って「止まって見える」。
+    # collect は起動時にこれを呼び、record の recording だけが存在する状態から始める（数秒・履歴は不要）。
+    "$0" stop
+    ensure_viewer
+    ;;
   stop-preview)
     p="$(preview_pid)"; if [ -n "$p" ]; then kill -INT "$p"; sleep 2; kill -0 "$p" 2>/dev/null && kill "$p"; echo "[monitor] preview: stopped"; else echo "[monitor] preview: not running"; fi
     rm -f "$RUN/preview.pid"
@@ -94,6 +101,11 @@ case "$CMD" in
   stop)
     "$0" stop-preview
     v="$(viewer_pid)"; if [ -n "$v" ]; then kill "$v"; echo "[monitor] viewer: stopped"; else echo "[monitor] viewer: not running (pidfile)"; fi
+    # pidfile の python ラッパを殺しても子の rerun 本体が :$PORT を握ったまま残ることがある（2026-09-22 16:3x「pid ?」）。
+    # ポートを握る rerun を名指しで落とし、閉じるまで待つ。
+    pkill -f "rerun --port ${PORT}" 2>/dev/null || true
+    for _ in 1 2 3 4 5 6 7 8 9 10; do port_open || break; sleep 0.5; done
+    port_open && echo "[monitor] 警告: :$PORT がまだ開いている（別プロセス？ ss -ltnp で確認）" >&2
     rm -f "$RUN/viewer.pid"
     ;;
   status)
