@@ -93,11 +93,12 @@ def reader(iface: str, latest: dict, stop: threading.Event) -> None:
 
 
 def run_report(path: Path, warn: float = 3.0) -> int:
-    """--record した CSV から、side ごとに「整列終了」「loop 開始」「+1 s」「+3 s」の logical を並べる。
+    """--record した CSV から、直近の「整列（位置制御）→ loop 開始」の遷移を side ごとに要約する。
 
-    loop 開始の検出: leader バスは「leader 整列（約 2.2 s）→ follower 接続・整列の空白（約 2.8 s・
-    受信なし）→ loop」の順なので、leader の受信が 1 s 以上途切れた後に再開した時刻を loop 開始とする。
-    整列終了の値は、leader は空白直前の最後の値、follower は loop 開始直前の値。
+    各バスの受信を 1 s 以上の空白で区切り（整列中は自ユニットだけ polling される・接続待ちは無受信）、
+    4 バスがすべて受信中になる最後の区間の先頭を loop 開始とする。各ユニットの整列終了値は
+    loop 開始より前の最後の区間の末尾の値。loop 開始 +0.1 / +1 / +3 / +8 s の値を並べ、
+    YAML からのずれ・leader≠follower・loop 後の動き（崩れ）に注記を付ける。
     """
     import csv
     from collections import defaultdict
@@ -105,52 +106,72 @@ def run_report(path: Path, warn: float = 3.0) -> int:
     rows = list(csv.DictReader(open(path, encoding="utf-8")))
     if not rows:
         print("empty"); return 1
-    by: dict = defaultdict(list)  # (iface, joint) -> [(t, native, logical, yaml)]
+    by: dict = defaultdict(list)  # (iface, joint) -> [(t, logical, yaml)]
     for r in rows:
         try:
-            by[(r["iface"], r["joint"])].append((float(r["t_rel"]), float(r["native_deg"]), float(r["logical_deg"]),
+            by[(r["iface"], r["joint"])].append((float(r["t_rel"]), float(r["logical_deg"]),
                                                 float(r["yaml_deg"]) if r.get("yaml_deg") else None))
         except (KeyError, ValueError):
             continue
+    buses = [i for i in UNIT if (i, "joint_1") in by]
+    if not buses:
+        print("no data"); return 1
 
-    def at(iface: str, j: str, t: float, w: float = 0.35) -> float | None:
-        vals = [l for (tt, _, l, _) in by.get((iface, j), []) if t - w <= tt <= t + w]
+    def segments(iface: str) -> list[tuple[float, float]]:
+        ts = sorted(t for (t, _, _) in by[(iface, "joint_1")])
+        segs: list[tuple[float, float]] = []; s0 = ts[0]; prev = ts[0]
+        for t in ts[1:]:
+            if t - prev > 1.0:
+                segs.append((s0, prev)); s0 = t
+            prev = t
+        segs.append((s0, prev))
+        return segs
+
+    segs = {i: segments(i) for i in buses}
+    for i in buses:
+        print(f"{i:10s} 受信区間: {[(round(a, 1), round(b, 1)) for a, b in segs[i][-4:]]}")
+    t_loop = max(segs[i][-1][0] for i in buses)
+    print(f"loop 開始（全バス受信）≈ {t_loop:.1f} s")
+
+    def at(iface: str, j: str, t: float, w: float = 0.3) -> float | None:
+        vals = [l for (tt, l, _) in by.get((iface, j), []) if t - w <= tt <= t + w]
         return sum(vals) / len(vals) if vals else None
 
     def last_before(iface: str, j: str, t: float) -> float | None:
-        vals = [l for (tt, _, l, _) in by.get((iface, j), []) if tt < t]
+        vals = [l for (tt, l, _) in by.get((iface, j), []) if tt < t]
         return vals[-1] if vals else None
+
+    def align_end(iface: str) -> float | None:
+        prior = [s for s in segs.get(iface, []) if s[0] < t_loop - 0.5]
+        return prior[-1][1] if prior else None
+
+    def f(v: float | None) -> str:
+        return "   -  " if v is None else f"{v:6.1f}"
 
     for side in ("left", "right"):
         lead = f"can_lead_{side[0]}"; fol = f"can_fol_{side[0]}"
-        ts = sorted(t for (i, j), arr in by.items() if i == lead and j == "joint_1" for (t, *_r) in arr)
-        if len(ts) < 5:
-            print(f"== {side}: leader データ不足（{len(ts)} 行）"); continue
-        # gaps in leader stream
-        gaps = [(ts[k - 1], ts[k]) for k in range(1, len(ts)) if ts[k] - ts[k - 1] > 1.0]
-        if not gaps:
-            print(f"== {side}: leader の受信に 1 s 以上の空白が無い＝整列→loop の遷移を含んでいない（連続 {ts[0]:.1f}〜{ts[-1]:.1f} s）")
-            t_loop = ts[0]; t_gap0 = None
-        else:
-            t_gap0, t_loop = gaps[0]
-        yaml = {j: next((y for (_, _, _, y) in by.get((lead, j), []) if y is not None), None) for j in JOINTS}
-        print(f"== {side}: leader 整列終了≈{t_gap0 if t_gap0 is not None else float('nan'):.1f}s  loop 開始≈{t_loop:.1f}s   （logical [deg]）")
-        print(f"   {'joint':8s} {'yaml':>7s} | {'lead@align':>10s} {'fol@align':>9s} {'Δ':>6s} | {'lead+0.1':>8s} {'fol+0.1':>8s} {'Δ':>6s} | {'lead+1':>7s} {'lead+3':>7s} {'fol+3':>7s} | 判定")
+        if lead not in buses and fol not in buses:
+            continue
+        ae_l = align_end(lead) if lead in buses else None
+        ae_f = align_end(fol) if fol in buses else None
+        yaml = {j: next((y for (_, _, y) in by.get((lead if lead in buses else fol, j), []) if y is not None), None) for j in JOINTS}
+        print(f"== {side}  leader 整列終了≈{f(ae_l)} s  follower 整列終了≈{f(ae_f)} s  loop={t_loop:.1f} s   （logical [deg]）")
+        print("   joint     yaml | lead@align fol@align     Δ | lead+0.1 fol+0.1 | lead+1  fol+1  | lead+3  fol+3  | lead+8  fol+8  | 判定")
         for j in JOINTS:
-            la = last_before(lead, j, t_gap0) if t_gap0 is not None else at(lead, j, t_loop)
-            fa = last_before(fol, j, t_loop)
-            l1 = at(lead, j, t_loop + 0.1); f1 = at(fol, j, t_loop + 0.1)
-            l2 = at(lead, j, t_loop + 1.0); l3 = at(lead, j, t_loop + 3.0); f3 = at(fol, j, t_loop + 3.0)
+            la = last_before(lead, j, ae_l + 0.01) if ae_l is not None else None
+            fa = last_before(fol, j, ae_f + 0.01) if ae_f is not None else None
+            d = (la - fa) if (la is not None and fa is not None) else None
+            l1, f1 = at(lead, j, t_loop + 0.1), at(fol, j, t_loop + 0.1)
+            l2, f2 = at(lead, j, t_loop + 1.0), at(fol, j, t_loop + 1.0)
+            l3, f3 = at(lead, j, t_loop + 3.0), at(fol, j, t_loop + 3.0)
+            l8, f8 = at(lead, j, t_loop + 8.0), at(fol, j, t_loop + 8.0)
             y = yaml.get(j)
-            f = lambda v: "   -   " if v is None else f"{v:7.1f}"
-            d_align = (la - fa) if (la is not None and fa is not None) else None
-            d_loop = (l1 - f1) if (l1 is not None and f1 is not None) else None
             notes = []
-            if y is not None and la is not None and abs(la - y) > warn: notes.append(f"leader 整列で YAML から {la - y:+.1f}")
-            if y is not None and fa is not None and abs(fa - y) > warn: notes.append(f"follower 整列で YAML から {fa - y:+.1f}")
-            if d_align is not None and abs(d_align) > warn: notes.append("整列時に lead≠fol ★")
-            if l1 is not None and l3 is not None and abs(l3 - l1) > 5: notes.append(f"loop 後 leader が {l3 - l1:+.1f} 動く（崩れ）")
-            print(f"   {j:8s} {f(y)} | {f(la):>10s} {f(fa):>9s} {f(d_align):>6s} | {f(l1):>8s} {f(f1):>8s} {f(d_loop):>6s} | {f(l2):>7s} {f(l3):>7s} {f(f3):>7s} | {'; '.join(notes)}")
+            if y is not None and la is not None and abs(la - y) > warn: notes.append(f"leader 整列が YAML から {la - y:+.1f}")
+            if y is not None and fa is not None and abs(fa - y) > warn: notes.append(f"follower 整列が YAML から {fa - y:+.1f}")
+            if d is not None and abs(d) > warn: notes.append("整列時 lead≠fol ★")
+            if l1 is not None and l3 is not None and abs(l3 - l1) > 5: notes.append(f"loop 後 leader {l3 - l1:+.1f}（崩れ）")
+            print(f"   {j:8s} {f(y)} | {f(la):>10s} {f(fa):>9s} {f(d):>5s} | {f(l1)} {f(f1)} | {f(l2)} {f(f2)} | {f(l3)} {f(f3)} | {f(l8)} {f(f8)} | {'; '.join(notes)}")
         print()
     return 0
 
