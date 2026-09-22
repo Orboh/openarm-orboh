@@ -1,92 +1,103 @@
-# 板橋 両腕（3 眼）積み木シーン v1 —— 2026-09-22 起草（Claude・Kento 実測待ち）
+# 板橋 両腕（3 眼）積み木シーン v1 —— 2026-09-22 起草・同日 16:0x に Kento の実測で確定（Claude 記入）
 #
 # 物理配置の宣言。ソフトの挙動は変えない。SCENE=itabashi-blockstack-v1 で収集を起動すると
 # このファイルの sha が manifest.json に焼かれる。**1 本でも録った後は書き換えず -v2 を作る。**
-# TODO は実機の前で巻き尺で埋める（残数は `python scripts/collect_manifest.py check-scene --scene-path scenes/itabashi-blockstack-v1.yaml`）。
+# 未測の項目は TODO でなく unknown / deferred_to_v2 と書いてある（record の TODO ガードは通す。
+# 値が決まったら v2 で埋める。積み木の寸法と色、積む位置、カメラ部品名が該当）。
 # 設定ダンプに出るもの（腕・fps・カメラ製造番号・解像度・重力補償・commit・較正 sha）はここに書かない。
 
 name: itabashi-blockstack-v1
 created: 2026-09-22
-measured: TODO              # 実測値を入れた日
-task: blockstack            # TASK="Stack the wooden blocks using both arms"
+measured: 2026-09-22       # Kento の実測（巻き尺・目視）。unknown の項目は v2 で埋める
+task: blockstack           # TASK="Stack the wooden blocks using both arms"
 note: >
   板橋の OpenArm 両腕（chest D435i + 左右 wrist D405 の 3 眼）で「両腕で積み木を積む」を録る。
+  1 エピソード = 円筒を土台に、その上に四角（立方体）、その上に三角柱を載せる（3 個・順序固定）。
+  積み木の置き場所（拾う位置）は固定、散らしなし、妨害物なし。積む位置は Kento が後で確定（v2）。
   収集者 Kento。較正フレームは 2026-09-21〜22 の bump-to-stop 版（左 leader は 09-22 11:42 の 3 回目）で、
-  08-04 右フレームで録った bottle v2 / tape v1 とは混ぜない（判別は manifest の較正 sha）。
+  開始姿勢は 2026-09-22 15:5x に J7 を両腕 0.0 にした版。08-04 右フレームで録った bottle v2 / tape v1 とは混ぜない
+  （判別は manifest の較正 sha と開始姿勢 sha）。
 
-# --- 机 ---------------------------------------------------------------------
-table:
-  kind: TODO                # height_adjustable / fixed
-  height_mm: TODO           # 床から天板まで（実測）
-  desk_preset: TODO         # 昇降テーブルでなければ null
-  surface: TODO             # 天板の材質と色
-  base_to_table_edge_mm: TODO   # 底板の先端から天板の縁まで（クランプ幅など測り直せる関係で）
-  base_mount: TODO          # 固定方法（クランプ／ボルト／置くだけ）
+# --- 机（2 台構成: ロボットの台と、対象物の作業台） ---------------------------
+robot_base:
+  mounted_on: fixed_table          # OpenArm の底板は固定机に固定
+  table_height_mm: 720             # 床から天板まで
+  base_plate_tip_to_table_edge_mm: 30   # 底板の先端から天板の縁まで（Kento 実測）
+  base_mount: fixed                # 固定方法の種別（クランプ／ボルト）は unknown
+  base_mount_detail: unknown
+
+table:                             # 対象物を置く作業台（積み木の作業面）
+  kind: height_adjustable
+  height_mm: 960                   # 床から天板まで（昇降テーブル・Kento 実測）
+  desk_preset: unknown             # 昇降のメモリ値は未記録
+  surface: unknown                 # 天板の材質と色は未記録（v2）
+  relation_to_robot: "OpenArm の固定机（720 mm）の前に昇降テーブル（960 mm）を置く。作業面はロボット底板より 240 mm 高い"
 
 mat:
-  present: TODO             # true / false
-  kind: TODO                # 敷かないなら null
-  orientation: TODO
+  present: false                   # 天板に敷物なし（2026-09-22 Kento 回答なし＝無しとして記録。違えば v2）
+  kind: null
+  orientation: null
 
 lighting:
-  source: TODO              # 例: 施設の常設照明のみ・追加光源なし
-  window: TODO              # 窓の有無・遮光・直射日光が入るか
+  source: "板橋オフィスの常設天井照明のみ（暖色）。追加光源なし"
+  window: unknown                  # 窓の有無・直射日光は未記録
   daylight_controlled: false
   daylight_recorded_at: "session layer（manifest.identity.started_local / notes.md の lighting_observed）"
-  note: TODO
+  note: "gate は 2026-09-22 16 時ごろに収録"
 
 # --- 対象物 -----------------------------------------------------------------
 object:
   kind: wooden_block
-  count: TODO               # 1 エピソードで積む個数
-  description: TODO         # 1 辺の mm・色・材質・表面（塗装／無垢）・個体差の有無
-  fill: solid               # 中身なし（無垢材）
-  orientation: TODO         # 向きを固定するか散らすか
+  count: 3                         # 1 エピソードで積む個数
+  shapes: [cylinder, cube, triangular_prism]   # 積む順（下から）
+  description: "円筒（土台）、四角（立方体）、三角柱（頂上）の木製積み木 3 個。1 辺の mm・色・表面（塗装／無垢）は未計測（v2）"
+  fill: solid                      # 中身なし（無垢材）
+  orientation: fixed               # 拾う位置と向きは固定
   condition: 劣化しない前提・同一セットで通す（欠け／汚れが出たら notes.md）
 
 place_target:
-  kind: TODO                # 積む場所（マーク／台／無し）
-  position: TODO            # 積む位置（机の直交 2 辺からの mm）
-  position_origin: TODO     # どの 2 辺から測ったか
-  markers: TODO             # 目印の有無と、カメラの画角に入るか
-  size_mm: TODO
+  kind: fixed_spot                 # 積む場所は 1 か所固定
+  position: deferred_to_v2         # 机の直交 2 辺からの mm（Kento が後で確定）
+  position_origin: deferred_to_v2
+  markers: unknown                 # 目印の有無
+  size_mm: unknown
 
 # --- 散らし方 ---------------------------------------------------------------
 scatter_policy:
-  mode: TODO                # coarse_grid / grid / fixed / rough_area
-  layout: TODO              # 例: 左右それぞれ 2x2
-  cells: TODO
-  strict: false
-  placement: TODO           # 枠をどこに取るか（左腕側／右腕側）
-  numbering: TODO           # どの位置が 0 か
-  reference_mark: TODO
-  reference_mark_position_mm: TODO
-  reference_mark_origin: TODO
-  reference_mark_in_camera_view: TODO
-  marking: TODO             # visual_only / tape_reference_only / tape_reference_low_contrast
-  cell_size_mm: TODO
-  area_mm: TODO             # 狭いほど学習は通り、汎化はその範囲に限られる
-  per_session: TODO         # 1 セッションで各セル何本
-  session_count: TODO
-  intentional_imbalance: TODO
+  mode: fixed                      # 散らさない（拾う位置は形ごとに固定）
+  layout: "形ごとに 1 か所（円筒・立方体・三角柱）"
+  cells: 1
+  strict: true
+  placement: unknown               # 左腕側／右腕側のどちらで拾うかは未記録（v2）
+  numbering: n/a
+  reference_mark: none
+  reference_mark_position_mm: n/a
+  reference_mark_origin: n/a
+  reference_mark_in_camera_view: n/a
+  marking: visual_only
+  cell_size_mm: n/a
+  area_mm: n/a
+  per_session: "gate 10 本、以後 1 セッション 10 本"
+  session_count: "未計画（2026-09-30 の AWS 枠までに録れるだけ）"
+  intentional_imbalance: none
 
 distractors:
-  present: TODO
+  present: false
   items: []
 
 # --- カメラの物理位置 -------------------------------------------------------
 camera_mount:
   chest:
-    height_mm: TODO
-    height_ref: TODO        # レンズ中心か取り付け部か・何からの高さか
-    tilt_deg: TODO          # 目分量でよい・下向き
-    mount_part: TODO        # 既製マウントなら部品名
-    view_note: TODO         # 散らす範囲・積む場所・目印・両腕の到達性が画角に入るか
+    height_mm: 650
+    height_ref: "OpenArm の台（底板）からの高さ（Kento 実測。レンズ中心か取り付け部かは未区別）"
+    tilt_deg: unknown              # 下向き・角度は目分量でも未記録
+    mount_part: unknown
+    view_note: "拾う位置と積む位置が画角に入ることをモニターのプレビューで確認する運用（v1 では未記録）"
   wrist_right:
-    mount_part: TODO        # D405 の手首マウント部品名
-    orientation: TODO       # 把持器に対する向き（指先が写るか）
-    view_note: TODO
+    mount_part: "D405 用手首マウント（部品名 unknown）"
+    orientation: unknown           # 指先が写るか未確認
+    view_note: unknown
   wrist_left:
-    mount_part: TODO
-    orientation: TODO
-    view_note: TODO
+    mount_part: "D405 用手首マウント（部品名 unknown）"
+    orientation: unknown
+    view_note: unknown
