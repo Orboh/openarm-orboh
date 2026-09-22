@@ -25,6 +25,7 @@
 #   RESUME=true REPO_ID=Orboh/bi_openarm_..._YYYYMMDD_HHMMSS DATASET_ROOT=$HOME/.cache/huggingface/lerobot/Orboh/bi_openarm_..._YYYYMMDD_HHMMSS \
 #     NUM_EPISODES=30 ... bash scripts/record_bimanual_openarm.sh <tag>   # 既存データセットへ追記(REPO_ID は stamp 後の実名・NUM_EPISODES は今回分)
 #   DISPLAY_DATA=true DISPLAY_IP=<手元PCのIP> DISPLAY_PORT=9876 ... bash scripts/record_bimanual_openarm.sh <tag>   # 手元 PC の rerun へ映像をストリーミング
+#   CONSOLE_FILTER=off bash scripts/record_bimanual_openarm.sh <tag>   # 画面の間引き（scripts/record_console_filter.py・2026-09-22）を切って全行を表示。console.log は常に全行
 #
 # 1収集セッション = 1 run_dir: ~/collections/<UTC>-<scene-tag>/ に
 #   console.log / start-pose-bimanual.jsonl / manifest.json / command.sh が残る。
@@ -535,7 +536,7 @@ set +e
   --dataset.push_to_hub=false \
   ${KP_ARGS[@]+"${KP_ARGS[@]}"} \
   ${POSE_ARGS[@]+"${POSE_ARGS[@]}"} \
-  "${GATE_ARGS[@]}" 2>&1 | tee -a "$CONSOLE_LOG"
+  "${GATE_ARGS[@]}" 2>&1 | tee -a "$CONSOLE_LOG" | "$PYTHON_BIN" -u "$REPO/scripts/record_console_filter.py"
 RC=${PIPESTATUS[0]}
 set -e
 
