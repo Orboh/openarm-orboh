@@ -18,6 +18,10 @@ leader と follower は offset がまるで違うので、生値どうしを比�
   python scripts/openarm_pose_monitor.py --record ~/collections/pose-0922-0930.csv --quiet   # logical を 0.2 秒ごとに CSV へ（teleop の前に起動）
   python scripts/openarm_pose_monitor.py --report ~/collections/pose-0922-0930.csv           # 整列終了・loop 開始・+1/+3 s の姿勢を side ごとに要約
 
+ライブ表示中は Enter で目印（MARK）を打てる: その時刻の行が [MARK n] として表示され、--record 中なら CSV にも
+  iface=MARK の行が入り、--report の末尾に「目印 n の直前の姿勢」が出る。手先を目で見て「いま曲がった」と
+  思った瞬間に押す。
+
 出力の読み方:
   Δ = leader の logical − follower の logical（同じ YAML へ整列した直後は 0 に近いはず）。
   |Δ| が --warn（既定 3°）を超えた行に ★。native の差は無視してよい（offset の差が乗る）。
@@ -173,6 +177,16 @@ def run_report(path: Path, warn: float = 3.0) -> int:
             if l1 is not None and l3 is not None and abs(l3 - l1) > 5: notes.append(f"loop 後 leader {l3 - l1:+.1f}（崩れ）")
             print(f"   {j:8s} {f(y)} | {f(la):>10s} {f(fa):>9s} {f(d):>5s} | {f(l1)} {f(f1)} | {f(l2)} {f(f2)} | {f(l3)} {f(f3)} | {f(l8)} {f(f8)} | {'; '.join(notes)}")
         print()
+    marks = sorted((float(r["t_rel"]), r.get("joint", "")) for r in rows if r.get("iface") == "MARK")
+    for tm, name in marks:
+        print(f"== 目印 {name} t={tm:.1f}s（loop 開始から {tm - t_loop:+.1f}s）の直前 0.3 s の logical [deg]")
+        for side in ("left", "right"):
+            lead = f"can_lead_{side[0]}"; fol = f"can_fol_{side[0]}"
+            if lead not in buses and fol not in buses:
+                continue
+            row = "  ".join(f"{j[-1] if j != 'gripper' else 'g'}:{f(at(lead, j, tm - 0.15, 0.15)).strip()}/{f(at(fol, j, tm - 0.15, 0.15)).strip()}" for j in JOINTS)
+            print(f"   {side:5s} lead/fol  {row}")
+        print()
     return 0
 
 
@@ -209,6 +223,23 @@ def main() -> int:
         t.start()
     signal.signal(signal.SIGINT, lambda *_: stop.set())
     t0 = time.monotonic()
+    marks: list[tuple[float, int]] = []
+
+    def _stdin_marks() -> None:
+        n = 0
+        try:
+            for _ in sys.stdin:
+                n += 1
+                tm = time.monotonic() - t0
+                marks.append((tm, n))
+                print(f"[MARK {n}] t={tm:.1f}s", flush=True)
+                if rec is not None:
+                    rec.write(f"{time.time():.3f},{tm:.3f},MARK,,,mark_{n},,,\n"); rec.flush()
+        except Exception:
+            pass
+
+    if not args.once and sys.stdin and sys.stdin.isatty():
+        threading.Thread(target=_stdin_marks, daemon=True).start()
     rec = None
     if args.record:
         rp = Path(args.record).expanduser(); rp.parent.mkdir(parents=True, exist_ok=True)
