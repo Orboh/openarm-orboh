@@ -11,6 +11,8 @@
 #   DISPLAY_IP=<手元PC> DISPLAY_PORT=9876 bash scripts/collect_bimanual.sh gate # 手元の rerun へ映像を飛ばす
 #   MONITOR=off bash scripts/collect_bimanual.sh gate      # record 中の映像をモニターに出さない（既定は on＝Thor のビューア :9876 へ 3 眼と関節値を流す・2026-09-22 Kento）
 #   GRIPPER_KP=12 bash scripts/collect_bimanual.sh gate      # follower gripper の kp を下げる(熱対策・2026-09-21。env に書いてもよい)
+#   DISPLAY_SCALE=1 DISPLAY_JPEG_QUALITY=95 bash scripts/collect_bimanual.sh gate   # 表示用画像を間引かず原寸・q95 で流す（既定は 1/2・q60。表示のみ、データは無関係）
+#   DISPLAY_STRIDE=3 bash scripts/collect_bimanual.sh gate   # 表示用画像を 3 フレームに 1 回だけ流す（関節値は毎フレーム）
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 ENV_FILE="${ENV_FILE:-$REPO/config/bimanual-collect.env}"
@@ -78,6 +80,14 @@ else
   export DISPLAY_DATA=false; unset DISPLAY_IP DISPLAY_PORT; MON_NOTE="off(viewer unavailable)"
 fi
 
+# 表示用画像の間引きと JPEG 品質（2026-09-22・dry5）。lerobot は DISPLAY_IP 指定時に JPEG を強制する（upstream の
+# 遠隔／Web ビューア向け帯域規則）。640x480 を q95 で毎サイクル 3 眼エンコードすると record ループが 30 Hz を割った
+# （22% のサイクルで 1〜4 ms 超過）。設計書 thor-camera-monitor-current §3.4 のプレビューと同じ 320x240・q60 を既定に
+# する。データセットには影響しない（表示コピーのみ）。
+if [ "$DISPLAY_DATA" = true ]; then
+  export LEROBOT_DISPLAY_IMAGE_SCALE="${DISPLAY_SCALE:-2}" LEROBOT_DISPLAY_JPEG_QUALITY="${DISPLAY_JPEG_QUALITY:-60}" LEROBOT_DISPLAY_IMAGE_STRIDE="${DISPLAY_STRIDE:-1}"
+  MON_NOTE="$MON_NOTE 1/${LEROBOT_DISPLAY_IMAGE_SCALE} q${LEROBOT_DISPLAY_JPEG_QUALITY} stride${LEROBOT_DISPLAY_IMAGE_STRIDE}"
+fi
 export OPERATOR TASK TASK_SLUG EPISODE_TIME_S LSCALE RSCALE
 export CAM_SERIAL="${CHEST_SERIAL:-344422070898}"
 export WRIST_RIGHT="${WRIST_RIGHT:-true}" WRIST_RIGHT_SERIAL WRIST_LEFT WRIST_LEFT_SERIAL
