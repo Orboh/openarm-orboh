@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # 両腕 bimanual lerobot teleop（重力補償＋vel FF＋fps200）。停止は Ctrl-C。
 # 起動時整列: 各腕 leader→follower が初期姿勢（肘36°）へ自動で動く（公式AdjustPosition移植・各約2.2秒×4・lerobot fork の align_on_connect=true 既定）。
-# 使い方: bash scripts/run_teleop_bimanual.sh [left_scale] [right_scale]  （既定 両腕1.2。右だけ下げる例: ... 1.2 1.0）
+# 使い方: bash scripts/run_teleop_bimanual.sh [left_scale] [right_scale]  （既定 両腕1.0＝2026-09-22 Kento の運用値。旧既定 1.2。左だけ上げる例: ... 1.1 1.0）
 # ⚠ 起動時は両腕を真下に垂らす（零位が焼かれる）。右系統CANはbus-off既往。
 # NOTE: leader 側は左右とも gravity_side を明示する（未指定だと既定 left＝右腕の重力補償が左モデルで誤計算される。2026-06-23 修正）。
 # 前提: lerobot venv は ~/projects/lerobot/.venv（Vector/Thor 共通）。URDF はリポ相対参照。
-LSCALE="${1:-1.2}"
+LSCALE="${1:-1.0}"
 RSCALE="${2:-$LSCALE}"
 # 3 番目以降の引数は lerobot-teleoperate へそのまま渡す（例: グリッパの kp を下げる
 #   --robot.left_arm_config.position_kp=[240,240,240,240,24,31,25,10] --robot.right_arm_config.position_kp=[...]

@@ -38,6 +38,7 @@ PASS = re.compile(
 DROP = re.compile(
     r"Batch refresh|Created a socket|Values used for joint limits|Streaming encoding|Gravity model ready"
     r"|Soft-aligning|Starting handshake|Handshake successful|Connecting arm|Connected to can_"
+    r"|^Svt\[(info|warn)\]|^-{20,}$"  # SVT-AV1 encoder banner at finalize (2026-09-22 dry7: ~60 lines)
 )
 ALERT = re.compile(r"\b(WARNING|ERROR|CRITICAL)\b")
 DUMP_START = re.compile(r"t_record\.py:\d+ \{")
