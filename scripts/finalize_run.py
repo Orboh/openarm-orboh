@@ -138,19 +138,46 @@ def load_episodes_meta(dataset_root: Path) -> tuple[dict[int, dict], float | Non
     out: dict[int, dict] = {}
     for path in parquets:
         try:
-            df = pd.read_parquet(path, columns=["episode_index", "tasks", "length"])
-        except Exception as exc:  # 列が無い/壊れている等
+            df = pd.read_parquet(path)
+        except Exception as exc:  # 壊れている等
             warn(f"{path} を読めない({exc})")
             continue
-        for row in df.itertuples(index=False):
-            tasks = row.tasks
+        if not {"episode_index", "length"}.issubset(df.columns):
+            warn(f"{path} に episode_index/length が無い")
+            continue
+        # 動画区間の列（カメラごとに from/to のペア）。データと動画のズレ検出に使う。
+        video_keys = [
+            c[len("videos/") : -len("/from_timestamp")]
+            for c in df.columns
+            if c.startswith("videos/") and c.endswith("/from_timestamp")
+        ]
+        for _, row in df.iterrows():
+            tasks = row.get("tasks")
             if hasattr(tasks, "tolist"):
                 tasks = tasks.tolist()
             if isinstance(tasks, (list, tuple)):
                 task = ", ".join(str(t) for t in tasks)
             else:
                 task = "" if tasks is None else str(tasks)
-            out[int(row.episode_index)] = {"task": task, "length": int(row.length)}
+            entry = {"task": task, "length": int(row["length"])}
+            # 各カメラの動画区間をフレーム数に換算しておく。
+            # 動画区間の長さは「そのエピソードで最も長かったテイク（破棄分を含む）」に
+            # なりうる（破棄の残骸フレームがエンコードされる不具合・lerobot 側で根治済み）。
+            # データの length と食い違っていれば、そのエピソードの映像後半は
+            # **破棄したテイクの映像**であり、学習に入れてはいけない。
+            if fps:
+                vf = {}
+                for key in video_keys:
+                    try:
+                        dur = float(row[f"videos/{key}/to_timestamp"]) - float(
+                            row[f"videos/{key}/from_timestamp"]
+                        )
+                        vf[key] = round(dur * float(fps))
+                    except (KeyError, TypeError, ValueError):
+                        continue
+                if vf:
+                    entry["video_frames"] = vf
+            out[int(row["episode_index"])] = entry
     return out, fps
 
 
@@ -216,6 +243,18 @@ def build_ledger(
         else:
             dur = ""
 
+        # データと動画の長さの突合。不一致＝映像の後半が破棄テイクの残骸。
+        note = ""
+        vf = meta.get("video_frames") or {}
+        bad_cams = {
+            key.rsplit(".", 1)[-1]: frames
+            for key, frames in vf.items()
+            if length is not None and frames != length
+        }
+        if bad_cams:
+            detail = ", ".join(f"{cam}={frames}f" for cam, frames in sorted(bad_cams.items()))
+            note = f"⚠動画不整合: data={length}f / video={detail}。学習に入れる前に除去する"
+
         rows.append(
             {
                 "ep": ep,
@@ -225,10 +264,11 @@ def build_ledger(
                 "retakes": count_retakes(entries) if entries else 0,
                 "worst_dev_deg": worst,
                 "gate_outcome": outcome,
-                # 人が埋める3列。空欄のまま残っていれば台帳は未完成。
+                # 人が埋める3列。空欄のまま残っていれば台帳は未完成
+                # （note は動画不整合の機械検出だけが先に書き込むことがある）。
                 "success": "",
                 "object_pos": "",
-                "note": "",
+                "note": note,
                 "judge": judge,
             }
         )
@@ -416,6 +456,12 @@ def main(argv: list[str] | None = None) -> int:
         print(str(notes))
     print(str(write_setup(run_dir, manifest)))
 
+    n_mismatch = sum(1 for r in rows if "動画不整合" in (r["note"] or ""))
+    if n_mismatch:
+        warn(
+            f"⚠ 動画とデータの長さが食い違うエピソードが {n_mismatch} 本ある"
+            "（破棄テイクの残骸が映像に混入。統合や学習に入れる前に除去する）"
+        )
     n_missing = sum(1 for r in rows if r["gate_outcome"] == "")
     if n_missing:
         warn(f"開始姿勢の記録が無いエピソードが {n_missing} 本ある(ゲート無効で録った可能性)")

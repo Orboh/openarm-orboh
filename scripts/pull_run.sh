@@ -41,7 +41,12 @@ if [ -z "$RUN" ]; then
   exit 0
 fi
 
+# ssh に渡す用（リモート側のシェルが展開する）
 SRC="\$HOME/$REMOTE_DIR/$RUN"
+# rsync に渡す用。**rsync の remote パスに $HOME を書くと展開されず**
+# /home/<user>/$HOME/... を探しに行って失敗する。相対パスはリモートの
+# ホーム基準に解決されるので、こちらを使う。
+SRC_REL="$REMOTE_DIR/$RUN"
 DEST="$VAULT_DEST/$RUN"
 
 echo "[pull] from: $REMOTE:~/$REMOTE_DIR/$RUN"
@@ -59,7 +64,9 @@ if [ "$FINALIZE" = "true" ]; then
   if [ "$DRY_RUN" = "true" ]; then
     echo "[pull] (dry-run) ssh $REMOTE finalize_run.py --run-dir ~/$REMOTE_DIR/$RUN"
   else
-    ssh "$REMOTE" "cd ~/projects/openarm-orboh && python3 scripts/finalize_run.py --run-dir $SRC" \
+    ssh "$REMOTE" "cd ~/projects/openarm-orboh && \
+      PY=\$(ls -d ~/projects/lerobot/.venv/bin/python 2>/dev/null || command -v python3) && \
+      \$PY scripts/finalize_run.py --run-dir $SRC" \
       2>&1 | sed 's/^/[pull] finalize: /' || echo "[pull] 警告: finalize が失敗した(回収は続ける)"
   fi
 fi
@@ -89,7 +96,7 @@ rsync "${RSYNC_ARGS[@]}" \
   --include='notes.md' \
   --include='setup/**' \
   --exclude='*' \
-  "$REMOTE:$SRC/" "$DEST/" | sed 's/^/[pull] /'
+  "$REMOTE:$SRC_REL/" "$DEST/" | sed 's/^/[pull] /'
 
 echo "[pull] 回収したもの:"
 ls -1 "$DEST" 2>/dev/null | sed 's/^/[pull]   /' || true

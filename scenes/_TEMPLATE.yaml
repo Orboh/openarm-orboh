@@ -1,0 +1,121 @@
+# シーンプロファイルの雛形 —— 新しい収集環境を作るときはこれをコピーする
+#
+#   cp scenes/_TEMPLATE.yaml scenes/<name>.yaml
+#   （<name> は英数ハイフン。例: bottle-desk-v1 / okra-cell-v1）
+#   → 実機の前で TODO を全部埋める → SCENE=<name> で収集を起動
+#
+# `_` で始まるファイルは雛形・テスト用とみなし、シーン一覧には出ない。
+#
+# ---------------------------------------------------------------------------
+# このファイルは「物理配置の宣言」であって、ソフトの挙動は変えない。
+# 収集スクリプトは SCENE=<name> を受け取り、このファイルの sha を manifest.json
+# に焼き込むだけ。だから守るルールは1つ:
+#
+#   物理配置を変えたら「新しいファイル」を作る。既存ファイルの中身は書き換えない。
+#   (同名で中身が変わると、過去セッションが名乗る条件と実物が食い違い、
+#    混ぜてよいデータかの判定ができなくなる)
+#
+#   ただし境界は「最初のコミット」ではなく**「最初のエピソード」**。参照している
+#   セッションが0本のうちは書き換えてよい（守るべき指し先が存在しないから）。
+#   1本でも録った後は、収集スクリプトが sha の食い違いを検出して起動を拒否する。
+#
+# 【ここに書くもの】ソフトが知り得ない物理だけ。
+#   机・マット・照明の常設条件・対象物・置き先・散らし方・カメラの取り付け。
+# 【ここに書かないもの】
+#   (a) 設定ダンプに出るもの＝左右の腕・fps・カメラの製造番号・解像度・重力補償値・
+#       commit・較正 sha（`console.log` が持つので二重に持たない）
+#   (b) **セッションごとに変わるもの**＝昼/夜・対象物の劣化・その日の異常。
+#       これらは静的な宣言にできないので **manifest.json と notes.md（セッション層）**
+#       に記録する。ここに書くと「固定するなら条件ごとに別シーンが必要・統制しない
+#       ならここに書いても何も言えない」のどちらかになって意味を持てない。
+# ---------------------------------------------------------------------------
+
+name: TODO                  # ファイル名（拡張子なし）と一致させる
+created: TODO               # YYYY-MM-DD
+measured: TODO              # 実測値を入れた日（実機の前で計測した日）
+task: TODO                  # 例: bottle-pick-and-place
+note: TODO                  # このシーンで何を録るか・誰が録るか・混ぜてはいけない相手
+
+# --- 机 ---------------------------------------------------------------------
+table:
+  kind: TODO                # 例: height_adjustable / fixed
+  height_mm: TODO           # 床から天板まで（実測）
+  # 昇降テーブルなら、テーブル自身の表示値も残す。**再現するときは表示を合わせる方が
+  # 測り直すより速く確実**なので、実質的な再現キーはこちらになる。
+  desk_preset: TODO         # 昇降テーブルでなければ null
+  surface: TODO             # 天板の材質と色（背景として画像に写り込む）
+  # 「ロボット基部」は定義が曖昧になりやすい。**測り直せる物理関係**で書く。
+  # 例: クランプを天板の縁に突き当てて固定し、底板の先端から縁までがクランプ幅。
+  base_to_table_edge_mm: TODO
+  base_mount: TODO
+
+mat:
+  present: TODO             # true / false
+  kind: TODO                # 敷かないなら null
+  orientation: TODO
+
+lighting:
+  # セッションをまたいで変わらないものだけ。
+  source: TODO              # 例: 施設の常設照明のみ・追加光源なし
+  window: TODO              # 窓の有無・遮光・直射日光が入るか
+  # 昼/夜は**ここに書かない**（セッションごとに変わる）。記録先は下の項目が指す。
+  daylight_controlled: false
+  daylight_recorded_at: "session layer（manifest.identity.started_local / notes.md の lighting_observed）"
+  note: TODO
+
+# --- 対象物 -----------------------------------------------------------------
+object:
+  kind: TODO
+  count: TODO
+  description: TODO         # 見た目が分かるように（容量・色・ラベル・透明度・表面処理）
+  fill: TODO                # 中身（重さが変わると掴み方が変わる）
+  orientation: TODO         # 向きを固定するか散らすか
+  # 収集中に劣化する物なら、**セッションごとの状態は notes.md / human_fields に書く**。
+  # ここには「劣化するか否か」と方針（交換する / 同一個体で通す）だけ。
+  condition: TODO
+
+place_target:
+  kind: TODO                # 置き先（かご・マーク・無し）
+  # ★再現の正本になるもの（マーカー等）があればそれを書く。座標は補助。
+  position: TODO
+  position_origin: TODO     # どの2辺から測った値か（直交2辺か対向2面かを明記）
+  markers: TODO             # 位置決めに使う目印と、**カメラの画角に入るか**
+  size_mm: TODO
+
+# --- 散らし方 ---------------------------------------------------------------
+scatter_policy:
+  mode: TODO                # coarse_grid / grid / fixed / rough_area
+  layout: TODO              # 例: 3x3
+  cells: TODO               # 例: [0,1,2,3,4,5,6,7,8]
+  strict: false             # true にするならセル中心の座標も定義すること
+  placement: TODO           # 枠をどこに取るか
+  numbering: TODO           # どの位置が 0 か。**決めて宣言しないと台帳の object_pos が意味を持たない**
+  reference_mark: TODO      # 基準の目印があるか（無いなら「無し」）
+  reference_mark_position_mm: TODO
+  reference_mark_origin: TODO
+  # ★画角に入る目印は近道学習の risk になる（方策が対象でなく目印を手がかりにする）。
+  # ただし**目印が静止していて対象が動く**なら、目印は対象の位置情報を持たないので
+  # risk は低い。低コントラスト化（背景と同色）でさらに下げられる。
+  reference_mark_in_camera_view: TODO
+  marking: TODO             # visual_only / tape_reference_only / tape_reference_low_contrast 等
+  cell_size_mm: TODO
+  area_mm: TODO             # ⚠ 狭いほど学習は通りやすいが**汎化はその範囲に限られる**
+  per_session: TODO         # 1セッションで各セルを何本ずつ録るか
+  session_count: TODO
+  # 意図的な偏りを作るなら、**目的ごとここに書く**。書かないと後から欠陥に見える。
+  intentional_imbalance: TODO
+
+distractors:
+  present: TODO
+  items: []
+
+# --- カメラの物理位置 -------------------------------------------------------
+# 製造番号・解像度・fps は設定ダンプが持つのでここには書かない。
+# 「どこに何度で付いているか」はソフトから見えないので、ここが正本。
+camera_mount:
+  chest:
+    height_mm: TODO
+    height_ref: TODO        # 何を基準に測った高さか（レンズ中心か取り付け部か）
+    tilt_deg: TODO          # 目分量でよい
+    mount_part: TODO        # 既製のマウントなら部品名。**角度より部品の方が再現キーになる**
+    view_note: TODO         # 画角に何が入るか（散らす範囲・置き先・目印・到達性）

@@ -102,11 +102,22 @@ def _repo_info(repo: Path | None) -> dict:
         return {"root": str(repo) if repo else None, "branch": None, "commit": None, "dirty_files": None}
     porcelain = _git(repo, "status", "--porcelain")
     dirty = len([line for line in porcelain.splitlines() if line.strip()]) if porcelain is not None else None
+    # 上流との差。fetch はしない（preflight が直前に best-effort で fetch している）。
+    # 「上流より古いコードで録った」ことが後から分かるように behind を残す。
+    counts = _git(repo, "rev-list", "--left-right", "--count", "@{u}...HEAD")
+    behind = ahead = None
+    if counts:
+        try:
+            behind, ahead = (int(x) for x in counts.split())
+        except ValueError:
+            pass
     return {
         "root": str(repo),
         "branch": _git(repo, "rev-parse", "--abbrev-ref", "HEAD"),
         "commit": _git(repo, "rev-parse", "HEAD"),
         "dirty_files": dirty,
+        "behind_upstream": behind,
+        "ahead_upstream": ahead,
     }
 
 
@@ -340,6 +351,14 @@ def cmd_init(args: argparse.Namespace) -> int:
             print(
                 f"[manifest] 警告: {repo_key} に未コミットの変更が {dirty} 件ある"
                 "(commit だけではこのセッションを再現できない)",
+                file=sys.stderr,
+            )
+    for repo_key in ("openarm_orboh", "lerobot"):
+        behind = manifest["code"][repo_key].get("behind_upstream")
+        if behind:
+            print(
+                f"[manifest] 警告: {repo_key} は上流より {behind} コミット古い"
+                "(push 済みの修正が取り込まれていない可能性)",
                 file=sys.stderr,
             )
     for entry in manifest["calibration"]:

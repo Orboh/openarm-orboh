@@ -24,6 +24,8 @@
 #   bash scripts/record_pick_place_openarm.sh <scene-tag>                         # 第1引数=シーンタグ(英数ハイフン)
 #   bash scripts/record_pick_place_openarm.sh bottle-desk50-bright                # 例
 #   WRIST=true bash scripts/record_pick_place_openarm.sh <tag>                    # chest + D405 wrist (2-cam, separate dataset)
+#   REMOTE=true bash scripts/record_pick_place_openarm.sh <tag>                    # 遠隔テレオペ収集 (leader は操作側PCの leader_agent)
+#   CHEST_V4L2=/dev/video11 ... bash scripts/record_pick_place_openarm.sh <tag>    # chest を仮想カメラから取る (PICO 分配・下記)
 #   NUM_EPISODES=2 DISPLAY_DATA=false bash scripts/record_pick_place_openarm.sh t # dry run
 #
 # 1収集セッション = 1 run_dir: ~/collections/<UTC>-<scene-tag>/ に
@@ -52,12 +54,49 @@ CAMERA_W="${CAMERA_W:-640}"
 CAMERA_H="${CAMERA_H:-480}"
 FPS="${FPS:-30}"                            # = dataset.fps AND teleop loop rate (record forces them equal); camera-capped (~<=60 @640x480 RGB). FPS=60 reduces follower jitter
 
+# ---- Chest source override (PICO 併用収集: v4l2loopback 分配の口) --------------
+# CHEST_V4L2=/dev/videoNN を指定すると chest を RealSense SDK 直でなく OpenCV
+# (V4L2) で開く。使いどころ: D435i を gst の tee で仮想カメラ2本へ分配し、片方を
+# PICO 送信 (OrinVideoSender)、もう片方をここへ渡すと「オペレータが PICO で見て
+# いる映像そのもの」がデータセットの chest になる。SDK 直読 (既定) は sender と
+# 同一カメラで排他なので、PICO 併用収集では必ずこちらを使うこと。
+CHEST_V4L2="${CHEST_V4L2:-}"
+# WRIST_V4L2: 同上の wrist 版。PiP 分配 (start-collection-cameras.sh) は実カメラ
+# 2台とも V4L2 で占有するので、分配併用時は両方を仮想カメラ経由にする。
+WRIST_V4L2="${WRIST_V4L2:-}"
+
 # Build the cameras dict: chest always; append wrist_<SIDE> only when WRIST=true
-CAMERAS="{ chest: {type: intelrealsense, serial_number_or_name: '$CAM_SERIAL', width: $CAMERA_W, height: $CAMERA_H, fps: $FPS}"
+if [ -n "$CHEST_V4L2" ]; then
+  CAMERAS="{ chest: {type: opencv, index_or_path: '$CHEST_V4L2', width: $CAMERA_W, height: $CAMERA_H, fps: $FPS}"
+else
+  CAMERAS="{ chest: {type: intelrealsense, serial_number_or_name: '$CAM_SERIAL', width: $CAMERA_W, height: $CAMERA_H, fps: $FPS}"
+fi
 if [ "$WRIST" = "true" ]; then
-  CAMERAS="$CAMERAS, wrist_${SIDE}: {type: intelrealsense, serial_number_or_name: '$WRIST_SERIAL', width: $CAMERA_W, height: $CAMERA_H, fps: $FPS}"
+  if [ -n "$WRIST_V4L2" ]; then
+    CAMERAS="$CAMERAS, wrist_${SIDE}: {type: opencv, index_or_path: '$WRIST_V4L2', width: $CAMERA_W, height: $CAMERA_H, fps: $FPS}"
+  else
+    CAMERAS="$CAMERAS, wrist_${SIDE}: {type: intelrealsense, serial_number_or_name: '$WRIST_SERIAL', width: $CAMERA_W, height: $CAMERA_H, fps: $FPS}"
+  fi
 fi
 CAMERAS="$CAMERAS }"
+
+# ---- Remote teleop (leader = 操作側PCの leader_agent) --------------------------
+# REMOTE=true: teleop を openarm_leader_remote (ZMQ 受信) に差し替える。leader
+# 実機とその重力補償は操作側PC (run_leader_agent_<side>.sh) の管轄なので、
+# --teleop.port / --teleop.gravity_* はこちらでは渡さない。ポートは leader_agent
+# 側と一致させる (right=5701/5711, left=5702/5712)。
+# 'a' キーはローカル収集と同じに働く: リモート teleop の soft_move_to が echo 経路で
+# leader_agent に戻り指令を送り、実 leader が開始姿勢へ整列→follower を歩かせる。
+# 指令が届かない/収束しない場合は従来どおり「手で戻す」にフォールバック (ゲートが検算)。
+REMOTE="${REMOTE:-false}"
+ZMQ_PORT="${ZMQ_PORT:-}"
+ECHO_PORT="${ECHO_PORT:-}"
+if [ "$REMOTE" = "true" ]; then
+  case "$SIDE" in
+    right) ZMQ_PORT="${ZMQ_PORT:-5701}"; ECHO_PORT="${ECHO_PORT:-5711}" ;;
+    left)  ZMQ_PORT="${ZMQ_PORT:-5702}"; ECHO_PORT="${ECHO_PORT:-5712}" ;;
+  esac
+fi
 
 # ---- Leader gravity compensation (light leader for comfortable collection) ---
 # Inject G(q) feed-forward on the leader (joints 1-7; gripper excluded) so it can
@@ -101,7 +140,12 @@ DISPLAY_DATA="${DISPLAY_DATA:-true}"        # set false for headless dry-run
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 POSE="$REPO/config/initial_pose_${SIDE}.yaml"
 POSE_ARGS=()
-[ -f "$POSE" ] && POSE_ARGS+=(--robot.initial_pose_path="$POSE" --teleop.initial_pose_path="$POSE")
+if [ -f "$POSE" ]; then
+  POSE_ARGS+=(--robot.initial_pose_path="$POSE")
+  # openarm_leader_remote に initial_pose_path は無い (leader 実機の整列は操作側の
+  # leader_agent が同名 YAML で行う。両マシンの YAML 同一が前提 = md5sum で照合)。
+  [ "$REMOTE" != "true" ] && POSE_ARGS+=(--teleop.initial_pose_path="$POSE")
+fi
 
 # run_dir の文字列だけ先に決める(ディレクトリはまだ作らない)。シーン/開始姿勢の
 # drift チェックが --collections-dir に $RUN_DIR の親を使うため、値が要る。
@@ -136,11 +180,15 @@ SCENE_PATH=""
 if [ -z "$SCENE" ]; then
   echo "[record] SCENE が未指定。物理条件が記録されず、あとから条件を復元できない。" >&2
   echo "[record] 利用可能なシーン:" >&2
+  # `_` 始まりは雛形・テスト用なので候補に出さない。
   if [ -d "$REPO/scenes" ]; then
-    ls -1 "$REPO/scenes" | sed 's/\.yaml$//; s/^/[record]   /' >&2
+    ls -1 "$REPO/scenes" | grep -v '^_' | sed 's/\.yaml$//; s/^/[record]   /' >&2
   else
     echo "[record]   (scenes/ が無い)" >&2
   fi
+  echo "[record] 新しい環境で録るなら、雛形をコピーして実測値を入れる:" >&2
+  echo "[record]   cp scenes/_TEMPLATE.yaml scenes/<name>.yaml && \$EDITOR scenes/<name>.yaml" >&2
+  echo "[record]   TODO を全部埋めるまでは起動できない(埋め忘れを防ぐため)" >&2
   echo "[record] 条件を残さない dry run なら SCENE=none" >&2
   exit 1
 fi
@@ -148,21 +196,59 @@ if [ "$SCENE" != "none" ]; then
   SCENE_PATH="$REPO/scenes/${SCENE}.yaml"
   if [ ! -f "$SCENE_PATH" ]; then
     echo "[record] シーンプロファイルが無い: $SCENE_PATH" >&2
+    echo "[record] 新しい環境なら、雛形をコピーして作る:" >&2
+    echo "[record]   cp scenes/_TEMPLATE.yaml \"scenes/${SCENE}.yaml\" && \$EDITOR \"scenes/${SCENE}.yaml\"" >&2
+    echo "[record] 実機の前で TODO を全部埋めてから、もう一度この起動を打つ。" >&2
+    echo "[record] 既存の環境で録るつもりなら、名前の綴りを確認する:" >&2
+    ls -1 "$REPO/scenes" 2>/dev/null | grep -v '^_' | sed 's/\.yaml$//; s/^/[record]   /' >&2
     exit 1
   fi
 fi
 
 # manifest を書く python。lerobot の定数(HF_LEROBOT_HOME・較正ルート)は lerobot
 # 自身から読ませたいので、lerobot-record と同じインタプリタを使う(shebang から取る)。
+# lerobot-record は PATH に無ければ lerobot venv のものを使う (Thor は venv 運用。
+# 兄弟スクリプト run_teleop_remote_*.sh と同じ流儀)。
+LEROBOT_RECORD="${LEROBOT_RECORD:-}"
+if [ -z "$LEROBOT_RECORD" ]; then
+  if command -v lerobot-record >/dev/null 2>&1; then
+    LEROBOT_RECORD=lerobot-record
+  else
+    LEROBOT_RECORD="$HOME/projects/lerobot/.venv/bin/lerobot-record"
+  fi
+fi
+if ! command -v "$LEROBOT_RECORD" >/dev/null 2>&1 && [ ! -x "$LEROBOT_RECORD" ]; then
+  echo "[record] NG: lerobot-record が見つからない ($LEROBOT_RECORD)" >&2
+  exit 1
+fi
+# venv をフルパスで呼ぶ場合、rerun ビューア等の同梱バイナリを rr.spawn が PATH から
+# 探すため、venv の bin を PATH に足す (無いと display_data=true が起動時に落ちる)。
+case "$LEROBOT_RECORD" in
+  */bin/lerobot-record) export PATH="$(dirname "$LEROBOT_RECORD"):$PATH" ;;
+esac
+
 PYTHON_BIN="${PYTHON_BIN:-}"
 if [ -z "$PYTHON_BIN" ]; then
   LR_BIN="$(command -v lerobot-record || true)"
   if [ -n "$LR_BIN" ]; then
     PYTHON_BIN="$(head -1 "$LR_BIN" | sed -e 's/^#!//' -e 's/[[:space:]].*$//')"
   fi
+  if [ ! -x "${PYTHON_BIN:-}" ]; then PYTHON_BIN="$HOME/projects/lerobot/.venv/bin/python"; fi
   if [ ! -x "${PYTHON_BIN:-}" ]; then PYTHON_BIN=python3; fi
 fi
 MANIFEST_TOOL="$REPO/scripts/collect_manifest.py"
+
+# ---- 同期負債の警告（録る前に「古いコードで録っていないか」を見える化） --------
+# ブロックしない。現場の Thor はオフラインがあり、古いコードで録ること自体は
+# manifest に commit/branch/behind が残るので追跡できる。防ぎたいのは
+# **黙って**古いまま録ること（実例: ←破棄の根治が push 済みなのに録画機に
+# 届いておらず、誰もそれを知らなかった＝2026-09-01）。SKIP_SYNC_CHECK=true で省略可。
+if [ "${SKIP_SYNC_CHECK:-false}" != "true" ] && [ -f "$REPO/scripts/check_repo_sync.sh" ]; then
+  LEROBOT_ROOT="$("$PYTHON_BIN" -c 'import lerobot, pathlib; print(pathlib.Path(lerobot.__file__).resolve().parents[2])' 2>/dev/null || true)"
+  for _r in "$REPO" ${LEROBOT_ROOT:+"$LEROBOT_ROOT"}; do
+    bash "$REPO/scripts/check_repo_sync.sh" "$_r" >&2 || true
+  done
+fi
 
 # TODO が残ったままでは録らせない。TODO 版の sha でセッションを記録すると、
 # あとで実測値を入れた時に sha が変わり、そのセッションだけ「もう存在しない版の
@@ -291,7 +377,12 @@ fi
 # 設定要約も console.log に入れる(ここで新規作成し、以降は追記)。
 {
   echo "[record] run_dir=$RUN_DIR  scene_tag=$TAG  ts_utc=$TS  host=$(hostname)"
-  echo "[record] side=$SIDE  follower=$FOLLOWER_PORT  leader=$LEADER_PORT"
+  if [ "$REMOTE" = "true" ]; then
+    echo "[record] side=$SIDE  follower=$FOLLOWER_PORT  teleop=REMOTE (zmq:$ZMQ_PORT echo:$ECHO_PORT / leader_agent は操作側PC)"
+    echo "[record]   'a' = ローカル同様に leader も戻る (echo 経路で leader_agent に指令。不達時は手戻しフォールバック)"
+  else
+    echo "[record] side=$SIDE  follower=$FOLLOWER_PORT  leader=$LEADER_PORT"
+  fi
   echo "[record] cameras=$CAMERAS"
   echo "[record] wrist=$WRIST  repo_id=$REPO_ID  episodes=$NUM_EPISODES  ${CAMERA_W}x${CAMERA_H}@${FPS}fps"
   echo "[record] gravity_comp=$GRAVITY_COMP scale=$GRAVITY_SCALE side=$SIDE urdf=$GRAVITY_URDF"
@@ -364,14 +455,19 @@ COMMAND_SH="$RUN_DIR/command.sh"
   echo '#!/usr/bin/env bash'
   echo "# 自動生成: このセッションを同じ条件で起動し直す行。"
   echo "# 解決済み設定の全文 -> console.log / 環境スナップショット -> manifest.json"
-  echo "# 設定ダンプが落とす type 判別子: robot.type=openarm_follower / teleop.type=openarm_leader"
+  if [ "$REMOTE" = "true" ]; then
+    echo "# 設定ダンプが落とす type 判別子: robot.type=openarm_follower / teleop.type=openarm_leader_remote"
+  else
+    echo "# 設定ダンプが落とす type 判別子: robot.type=openarm_follower / teleop.type=openarm_leader"
+  fi
   echo "# カメラ: $CAM_NOTE"
   echo "set -euo pipefail"
   printf 'OPERATOR=%q \\\n' "$OPERATOR"
   printf 'JUDGE=%q \\\n' "$JUDGE"
   printf 'SCENE=%q \\\n' "$SCENE"
   printf 'SIDE=%q \\\n' "$SIDE"
-  printf 'CAM_SERIAL=%q \\\n' "$CAM_SERIAL"
+  printf 'REMOTE=%q ZMQ_PORT=%q ECHO_PORT=%q \\\n' "$REMOTE" "$ZMQ_PORT" "$ECHO_PORT"
+  printf 'CAM_SERIAL=%q CHEST_V4L2=%q \\\n' "$CAM_SERIAL" "$CHEST_V4L2"
   printf 'WRIST=%q WRIST_SERIAL=%q \\\n' "$WRIST" "$WRIST_SERIAL"
   printf 'CAMERA_W=%q CAMERA_H=%q FPS=%q \\\n' "$CAMERA_W" "$CAMERA_H" "$FPS"
   printf 'NUM_EPISODES=%q EPISODE_TIME_S=%q RESET_TIME_S=%q \\\n' "$NUM_EPISODES" "$EPISODE_TIME_S" "$RESET_TIME_S"
@@ -397,20 +493,34 @@ rm -f "$MANIFEST_INIT_OUT"
 # set -e を一時的に外す: pipefail 下で lerobot が非0終了すると、ここで即座に
 # 抜けて終了メッセージも終了コードの伝播も走らなくなる。PIPESTATUS[0] で
 # lerobot 自身の終了コードを取り(tee の 0 で隠さない)、最後に伝播させる。
+# teleop 引数: local = leader 実機を Thor の CAN で直接駆動 / remote = ZMQ 受信
+if [ "$REMOTE" = "true" ]; then
+  TELEOP_ARGS=(
+    --teleop.type=openarm_leader_remote
+    --teleop.id="leader_${SIDE}_remote"
+    --teleop.zmq_port="$ZMQ_PORT"
+    --teleop.echo_port="$ECHO_PORT"
+  )
+else
+  TELEOP_ARGS=(
+    --teleop.type=openarm_leader
+    --teleop.port="$LEADER_PORT"
+    --teleop.id="leader_${SIDE}"
+    --teleop.gravity_compensation="$GRAVITY_COMP"
+    --teleop.gravity_urdf_path="$GRAVITY_URDF"
+    --teleop.gravity_side="$SIDE"
+    --teleop.gravity_scale="$GRAVITY_SCALE"
+  )
+fi
+
 set +e
-lerobot-record \
+"$LEROBOT_RECORD" \
   --robot.type=openarm_follower \
   --robot.port="$FOLLOWER_PORT" \
   --robot.side="$SIDE" \
   --robot.id="follower_${SIDE}" \
   --robot.cameras="$CAMERAS" \
-  --teleop.type=openarm_leader \
-  --teleop.port="$LEADER_PORT" \
-  --teleop.id="leader_${SIDE}" \
-  --teleop.gravity_compensation="$GRAVITY_COMP" \
-  --teleop.gravity_urdf_path="$GRAVITY_URDF" \
-  --teleop.gravity_side="$SIDE" \
-  --teleop.gravity_scale="$GRAVITY_SCALE" \
+  "${TELEOP_ARGS[@]}" \
   --display_data="$DISPLAY_DATA" \
   --dataset.repo_id="$REPO_ID" \
   --dataset.single_task="$TASK" \

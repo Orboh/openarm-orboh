@@ -32,7 +32,7 @@ VENV="$HOME/projects/lerobot/.venv/bin/python"
 HF="$HOME/projects/lerobot/.venv/bin/hf"
 EVAL="$HOME/projects/openarm-orboh/scripts/g4/eval_openarm.py"
 GR00T="$HOME/projects/Isaac-GR00T-n1.7"
-MODEL="$HOME/models/gr00t-bottle-v1"
+MODEL="${MODEL:-$HOME/models/gr00t-bottle-v2}"
 
 # --- 引数 ---
 TAG="${1:-untagged}"; shift || true
