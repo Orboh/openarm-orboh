@@ -30,15 +30,29 @@ viewer_pid(){ [ -f "$RUN/viewer.pid" ] && kill -0 "$(cat "$RUN/viewer.pid")" 2>/
 preview_pid(){ [ -f "$RUN/preview.pid" ] && kill -0 "$(cat "$RUN/preview.pid")" 2>/dev/null && cat "$RUN/preview.pid"; }
 port_open(){ ss -ltn 2>/dev/null | grep -q ":${PORT} "; }
 
+x_reachable(){ DISPLAY="$1" XAUTHORITY="$2" xset q >/dev/null 2>&1; }
+
 detect_display(){
   # ログイン中のデスクトップ（gnome-shell）の DISPLAY/XAUTHORITY を借りる
   local p
+  DISPLAY_D=""; XAUTH_D=""
   for p in $(pgrep -u "$USER" -x gnome-shell); do
     DISPLAY_D="$(tr '\0' '\n' < /proc/$p/environ | sed -n 's/^DISPLAY=//p' | head -1)"
     XAUTH_D="$(tr '\0' '\n' < /proc/$p/environ | sed -n 's/^XAUTHORITY=//p' | head -1)"
     [ -n "$DISPLAY_D" ] && break
   done
-  DISPLAY_D="${DISPLAY:-${DISPLAY_D:-}}"; XAUTH_D="${XAUTHORITY:-${XAUTH_D:-}}"
+  # 呼び出し元が明示した DISPLAY/XAUTHORITY を優先する——ただし **実際に X へ届くときだけ**。
+  # ssh や tmux から呼ぶと古い転送用の DISPLAY を引き継いでいることがあり、無条件に優先すると
+  # "X11 connection rejected because of wrong authentication" で止まる（2026-09-23 板橋）。
+  # 届かない値は黙って捨て、ログイン中のデスクトップへ落とす。
+  local cd_="${DISPLAY:-}" cx_="${XAUTHORITY:-${XAUTH_D:-}}"
+  if [ -n "$cd_" ]; then
+    if x_reachable "$cd_" "$cx_"; then
+      DISPLAY_D="$cd_"; XAUTH_D="$cx_"
+    else
+      echo "[monitor] 呼び出し元の DISPLAY=$cd_ は X へ届かない。デスクトップの ${DISPLAY_D:-<無し>} を使う" >&2
+    fi
+  fi
 }
 
 ensure_viewer(){
@@ -56,9 +70,19 @@ ensure_viewer(){
     port_open && echo "[monitor] viewer: started on DISPLAY=$DISPLAY_D, listening :$PORT (pid $(cat "$RUN/viewer.pid"))" \
               || { echo "[monitor] viewer が :$PORT で待受しない。log:"; tail -5 "$RUN/viewer.log"; return 1; }
   fi
-  # モニターの暗転防止（X の DPMS とスクリーンセーバ。X セッション毎にリセットされるので毎回）
+  # モニターの暗転防止（X の DPMS とスクリーンセーバ。X セッション毎にリセットされるので毎回）。
+  # **ここの失敗で start 全体を落とさない**——暗転防止は飾りで、ビューアと preview の起動とは
+  # 独立している。以前は最後の式の終了状態がそのまま ensure_viewer の返り値になり、
+  # `ensure_viewer || exit 1` で preview まで起動しなかった（2026-09-23 板橋）。
   detect_display
-  if [ -n "${DISPLAY_D:-}" ]; then DISPLAY="$DISPLAY_D" XAUTHORITY="$XAUTH_D" xset s off -dpms 2>/dev/null && echo "[monitor] dpms/screensaver off on $DISPLAY_D"; fi
+  if [ -n "${DISPLAY_D:-}" ]; then
+    if DISPLAY="$DISPLAY_D" XAUTHORITY="$XAUTH_D" xset s off -dpms 2>/dev/null; then
+      echo "[monitor] dpms/screensaver off on $DISPLAY_D"
+    else
+      echo "[monitor] dpms/screensaver を止められなかった（続行）" >&2
+    fi
+  fi
+  return 0
 }
 
 case "$CMD" in
