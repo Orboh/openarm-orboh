@@ -527,6 +527,10 @@ COMMAND_SH="$RUN_DIR/command.sh"
   printf 'NUM_EPISODES=%q EPISODE_TIME_S=%q RESET_TIME_S=%q \\\n' "$NUM_EPISODES" "$EPISODE_TIME_S" "$RESET_TIME_S"
   printf 'REPO_ID=%q \\\n' "$REPO_ID"
   printf 'RESUME=%q DATASET_ROOT=%q \\\n' "$RESUME" "$DATASET_ROOT"
+  # 開始姿勢ファイルと片腕凍結も残す（2026-09-23）。v2 は右腕を RIGHT_POSE_PATH + FREEZE_SIDE で
+  # カメラ役に固定するので、これが無い command.sh を再実行すると右腕が既定姿勢で普通にテレオペされる。
+  printf 'LEFT_POSE_PATH=%q RIGHT_POSE_PATH=%q \\\n' "$LPOSE" "$RPOSE"
+  printf 'FREEZE_SIDE=%q FROZEN_GRIPPER_DEG=%q \\\n' "${FREEZE_SIDE:-}" "${FROZEN_GRIPPER_DEG:-}"
   printf 'PLAY_SOUNDS=%q DISPLAY_IP=%q DISPLAY_PORT=%q \\\n' "$PLAY_SOUNDS" "$DISPLAY_IP" "$DISPLAY_PORT"
   printf 'D405_GAIN=%q D405_EXPOSURE=%q D435_BRIGHTNESS=%q \\\n' "${D405_GAIN:-}" "${D405_EXPOSURE:-}" "${D435_BRIGHTNESS:-}"
   printf 'TASK=%q \\\n' "$TASK"
