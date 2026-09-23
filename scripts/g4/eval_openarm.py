@@ -339,6 +339,11 @@ class EvalConfig:
     # 既定（horizon=8・every=25）では **200 step に1枚**——1回の実行で画像が
     # ほぼ残らなかった。チャンク数で数えるよう改めた。
     frame_log_every: int = 1
+    # chest 以外のカメラ（手首）も保存する（2026-09-24 板橋 v2）。chest は従来どおり
+    # frame_log_dir に .npy（convert_trajlog_to_lerobot.py の入力）、それ以外は同じ実行フォルダの
+    # frames_<camera>/frame_<step>.jpg（JPEG q90）。書き込みは別スレッドで行い制御ループを待たせない。
+    # 既定 false（従来どおり chest のみ）。
+    save_wrist_frames: bool = False
 
     # 毎ステップの関節角を CSV に記録する（実行どうしを数値で比較するため）。
     # クランプ警告からしか関節角を読めなかった問題への対処——クランプが発動しなくなると
@@ -570,6 +575,13 @@ class SafeRunner:
                 )
 
 
+def _write_jpeg(img, path: str) -> None:
+    """RGB 画像を JPEG で書く（手首カメラの保存用・別スレッドから呼ぶ）。"""
+    import cv2
+
+    cv2.imwrite(path, cv2.cvtColor(img, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, 90])
+
+
 def _stash_cameras(robot) -> list:
     """各腕のカメラを一時的に外し、connect() でカメラを開かせない（defer_camera_connect 用）。
 
@@ -765,6 +777,18 @@ def eval(cfg: EvalConfig):
         )
         logging.info(f"軌道ログを記録する: {cfg.trajectory_log}")
 
+    wrist_pool = None
+    wrist_dirs = {}
+    if cfg.save_wrist_frames and cfg.frame_log_dir:
+        from concurrent.futures import ThreadPoolExecutor
+
+        wrist_pool = ThreadPoolExecutor(max_workers=1)
+        base = os.path.dirname(os.path.abspath(cfg.frame_log_dir))
+        for k in camera_keys[1:]:
+            wrist_dirs[k] = os.path.join(base, f"frames_{k}")
+            os.makedirs(wrist_dirs[k], exist_ok=True)
+        logging.info(f"手首カメラの画像も保存する: {list(wrist_dirs.values())}")
+
     try:
         cam_stash = _stash_cameras(robot) if cfg.defer_camera_connect else None
         robot.connect()
@@ -795,6 +819,13 @@ def eval(cfg: EvalConfig):
                 if img is not None:
                     os.makedirs(cfg.frame_log_dir, exist_ok=True)
                     np.save(os.path.join(cfg.frame_log_dir, f"frame_{at_step:05d}.npy"), img)
+                if wrist_pool is not None:
+                    for k, d in wrist_dirs.items():
+                        wimg = source_obs.get(k)
+                        if wimg is not None:
+                            wrist_pool.submit(
+                                _write_jpeg, np.array(wimg, copy=True), os.path.join(d, f"frame_{at_step:05d}.jpg")
+                            )
             except Exception:
                 logging.warning("フレーム保存に失敗（実行は継続する）", exc_info=False)
 
@@ -913,6 +944,14 @@ def eval(cfg: EvalConfig):
 
         # 正常終了・Ctrl-C・例外のどの経路でもここを通す（本実装の要点）
         runner.shutdown()
+        # 腕の脱力を先に済ませてから、手首画像の書き残しを待つ
+        if wrist_pool is not None:
+            try:
+                wrist_pool.shutdown(wait=True)
+                for k, d in wrist_dirs.items():
+                    logging.info(f"手首カメラ {k} の画像 {len(os.listdir(d))} 枚: {d}")
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":

@@ -73,4 +73,5 @@ MODEL="$MODEL" exec bash "$REPO/scripts/g4/run_rollout.sh" "bi-blockstack-leftar
   --lang_instruction="$LANG_TEXT" \
   --policy_host=127.0.0.1 --policy_port=5555 \
   --dry_run=$DRY --fps=30 --max_steps=1500 --action_horizon=16 --log_obs_every_step=true \
-  --defer_camera_connect=true --camera_wait_s=30
+  --defer_camera_connect=true --camera_wait_s=30 \
+  --save_wrist_frames=true
