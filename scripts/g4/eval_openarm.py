@@ -585,43 +585,61 @@ def _stash_cameras(robot) -> list:
 
 
 def _realsense_serials() -> set:
-    try:
-        import pyrealsense2 as rs
-    except ImportError:
-        return set()
-    try:
-        return {
-            d.get_info(rs.camera_info.serial_number) for d in rs.context().query_devices()
-        }
-    except Exception:
-        return set()
+    """USB 上に見えている RealSense のシリアル一覧。取得に失敗したら例外をそのまま上げる。"""
+    import pyrealsense2 as rs
+
+    return {d.get_info(rs.camera_info.serial_number) for d in rs.context().query_devices()}
 
 
 def _connect_stashed_cameras(stash: list, wait_s: float) -> None:
     """整列が終わったあとにカメラを開いて腕へ戻す。
 
-    RealSense は USB 上にシリアルが見えるまで最大 wait_s 秒待つ（見えないまま connect() を
-    呼ぶと 15 秒以上かけて ConnectionError になるため、先に列挙で確かめる）。開けたカメラだけを
-    腕へ戻すので、途中で失敗しても disconnect() が開いていないカメラを閉じに行かない。
+    1. **まだどのカメラも開いていない時点で**、必要な RealSense のシリアルが全部 USB 上に
+       見えるまで最大 wait_s 秒待つ。開いて映像を流し始めたあとに一覧を取り直すと、取得が
+       失敗して見えているカメラまで「無い」扱いになる（2026-09-24 r4 で実際に起きた。
+       1 台ずつ開きながら探す初版の誤り）
+    2. 揃ったら全カメラを続けて開く。開けたカメラだけを腕へ戻すので、途中で失敗しても
+       disconnect() が開いていないカメラを閉じに行かない
     """
-    for arm, cams in stash:
+    needed = {}
+    for _arm, cams in stash:
         for key, cam in cams.items():
             serial = getattr(getattr(cam, "config", None), "serial_number_or_name", None)
             if type(cam).__name__ == "RealSenseCamera" and serial:
-                t0 = time.time()
-                while str(serial) not in _realsense_serials():
-                    if time.time() - t0 > wait_s:
-                        raise ConnectionError(
-                            f"カメラ {key}（RealSense {serial}）が {wait_s:.0f} 秒待っても USB 上に現れない。"
-                            "ケーブルの抜けを確認すること。"
-                        )
-                    time.sleep(0.5)
-                waited = time.time() - t0
-                if waited > 1.0:
-                    logging.warning(
-                        f"カメラ {key}（{serial}）は整列後 {waited:.1f} 秒で USB に戻った"
-                        "（整列の動きでケーブルが引かれて一時的に抜けていた可能性）"
-                    )
+                needed[str(serial)] = key
+    if needed:
+        t0 = time.time()
+        first_missing = None
+        last_err = None
+        while True:
+            try:
+                present = _realsense_serials()
+                last_err = None
+            except Exception as e:  # 取得の失敗は握りつぶさずに記録して待ち続ける
+                present = set()
+                if last_err is None:
+                    logging.warning(f"RealSense の一覧取得に失敗した（待ち続ける）: {e}")
+                last_err = e
+            missing = [s for s in needed if s not in present]
+            if first_missing is None:
+                first_missing = list(missing)
+            if not missing:
+                break
+            if time.time() - t0 > wait_s:
+                names = ", ".join(f"{needed[s]}（{s}）" for s in missing)
+                cause = f"。最後の一覧取得エラー: {last_err}" if last_err else ""
+                raise ConnectionError(
+                    f"カメラ {names} が {wait_s:.0f} 秒待っても USB 上に現れない。ケーブルの抜けを確認すること{cause}"
+                )
+            time.sleep(0.5)
+        if first_missing:
+            names = ", ".join(f"{needed[s]}（{s}）" for s in first_missing)
+            logging.warning(
+                f"カメラ {names} は整列の直後には USB 上に無く、{time.time() - t0:.1f} 秒後に揃った"
+                "（整列の動きでケーブルが引かれて一時的に抜けていた可能性）"
+            )
+    for arm, cams in stash:
+        for key, cam in cams.items():
             cam.connect()
             arm.cameras[key] = cam
             logging.info(f"カメラ {key} を整列後に開いた")
