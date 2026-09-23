@@ -39,6 +39,9 @@ DROP = re.compile(
     r"Batch refresh|Created a socket|Values used for joint limits|Streaming encoding|Gravity model ready"
     r"|Soft-aligning|Starting handshake|Handshake successful|Connecting arm|Connected to can_"
     r"|^Svt\[(info|warn)\]|^-{20,}$"  # SVT-AV1 encoder banner at finalize (2026-09-22 dry7: ~60 lines)
+    # 3 眼ぶんのエンコーダが同時に stderr へ書くので `Svt[info]:` の接頭辞と本文が別行に割れることがある。
+    # 割れた断片は上の行に当たらず端末へ漏れる（2026-09-23 の収集で保存のたびに不定期に出た）。
+    r"|^SVT \[|^LIB Build date:|^Preset M\d+ is mapped"
 )
 ALERT = re.compile(r"\b(WARNING|ERROR|CRITICAL)\b")
 DUMP_START = re.compile(r"t_record\.py:\d+ \{")
