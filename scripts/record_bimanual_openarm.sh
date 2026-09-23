@@ -300,7 +300,14 @@ MANIFEST_TOOL="$REPO/scripts/collect_manifest.py"
 # な姿勢に着地し、それが気づかれないまま収集が進む。joint_1/2/3/5/6/7 は左右で
 # 符号反転(|L+R|が小さいはず)、joint_4(肘)は左右で同符号(|L-R|が小さいはず)、
 # gripper は較正ゼロ固定で対象外。
-if [ -f "$LPOSE" ] && [ -f "$RPOSE" ]; then
+#
+# **片腕を凍結している場合は検算しない**（FREEZE_SIDE・2026-09-23）。この検査は
+# 「両腕が鏡像で同じ作業をする」前提のもので、片腕をカメラ役に振った時点でその
+# 前提が成立しない。意図した非対称を毎回 ALLOW_ASYM_POSE=true で押し通す運用に
+# すると、生きている側の姿勢ミスを拾う機能まで一緒に殺すことになる。
+if [ -n "${FREEZE_SIDE:-}" ]; then
+  echo "[record-bi] 鏡像チェックは省略する（FREEZE_SIDE=$FREEZE_SIDE で意図的に非対称）"
+elif [ -f "$LPOSE" ] && [ -f "$RPOSE" ]; then
   POSE_MIRROR_TOL_DEG="${POSE_MIRROR_TOL_DEG:-2.0}"
   MIRROR_CHECK_OUT="$("$PYTHON_BIN" - "$LPOSE" "$RPOSE" "$POSE_MIRROR_TOL_DEG" <<'PYEOF'
 import sys
