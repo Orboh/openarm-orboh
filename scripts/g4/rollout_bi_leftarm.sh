@@ -26,6 +26,12 @@ case "$MODE" in
     export HF_TOKEN="$(cat "$HOME/.cache/huggingface/token")"
     export HF_HOME="$HOME/.cache/huggingface"
     R="$HOME/projects/Isaac-GR00T-n1.7"
+    # Thor の ~/.bashrc は LD_LIBRARY_PATH の先頭に /usr/local/cuda/lib64 を足す。対話端末から起動すると
+    # libcublas は venv 同梱（nvidia/cu13）、libcublasLt だけシステムの CUDA 13.0 が読まれて版がずれ、
+    # 最初の推論で CUBLAS_STATUS_NOT_INITIALIZED になる（2026-09-24 01:12 に実際に発生）。
+    # `tmux new-session -d "..."` は .bashrc を読まないので、以前の起動では表面化しなかった。
+    # venv 同梱の 2 つで揃えるため、サーバだけシステム CUDA を読み込み経路から外す。
+    unset LD_LIBRARY_PATH
     cd "$R"
     echo "[serve] model=$MODEL embodiment=$OPENARM_EMBODIMENT cameras=$OPENARM_CAMERAS"
     exec "$R/.venv/bin/python" gr00t/eval/run_gr00t_server.py \
