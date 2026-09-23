@@ -62,7 +62,11 @@ case "$MODE" in
     export NUM_EPISODES="$NUM"
     ;;
 esac
-TAG="bi-${TASK_SLUG}-${SUFFIX}"
+# scene-tag は英数ハイフンのみ（record_bimanual_openarm.sh の検証）。TASK_SLUG は repo_id に
+# 入る名前なので下線を使う（命名標準 §4: dataset は <robot>_<task>_<obs>_vN）。両者は別レイヤー
+# なので、タグを作るときだけ下線をハイフンへ寄せる。ここを揃えないと TASK_SLUG=blockstack_leftarm
+# のような下線入りの slug で gate の起動が即エラーになる（2026-09-23）。
+TAG="bi-${TASK_SLUG//_/-}-${SUFFIX}"
 
 # record 中の映像出力（2026-09-22 Kento 決定: 既定オン）。record 自身が Thor のビューア（rerun :9876）へ
 # 3 眼と関節値を流す。プレビュー用プロセスとは RealSense が排他なので、下でプレビューを止めビューアだけ確保する。

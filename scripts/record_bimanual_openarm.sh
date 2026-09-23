@@ -173,8 +173,19 @@ if [ -n "$DISPLAY_IP" ] && [ -n "$DISPLAY_PORT" ]; then
 fi
 
 # ---- Start pose alignment (左右それぞれキャプチャ済みなら使う) -----------------
-LPOSE="$REPO/config/initial_pose_left.yaml"
-RPOSE="$REPO/config/initial_pose_right.yaml"
+# 既定は config/initial_pose_<side>.yaml。LEFT_POSE_PATH / RIGHT_POSE_PATH で差し替えられる
+# （2026-09-23・v2 で右腕をカメラ役に固定するため右だけ別ファイルにする用途）。**明示したのに
+# ファイルが無いときは黙って公式既定(肘36°)へ落ちず、ここで落とす**——開始姿勢が収集と推論で
+# 割れるのは発覚が最も遅い種類の事故で、フォールバックさせてよい場面ではない。
+LPOSE="${LEFT_POSE_PATH:-$REPO/config/initial_pose_left.yaml}"
+RPOSE="${RIGHT_POSE_PATH:-$REPO/config/initial_pose_right.yaml}"
+for _v in LEFT_POSE_PATH RIGHT_POSE_PATH; do
+  _p="${!_v:-}"
+  if [ -n "$_p" ] && [ ! -f "$_p" ]; then
+    echo "[record-bi] $_v に指定した開始姿勢ファイルが無い: $_p" >&2
+    exit 1
+  fi
+done
 POSE_ARGS=()
 if [ -f "$LPOSE" ]; then
   POSE_ARGS+=(--robot.left_arm_config.initial_pose_path="$LPOSE" --teleop.left_arm_config.initial_pose_path="$LPOSE")

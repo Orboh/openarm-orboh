@@ -90,8 +90,16 @@ if [ "$SIDE" = "bimanual" ]; then
     --robot.id=follower
     --robot.cameras="$CAMERAS"
   )
-  LPOSE="$REPO/config/initial_pose_left.yaml"
-  RPOSE="$REPO/config/initial_pose_right.yaml"
+  # 収集と同じファイルを指すこと。record 側と同じ env 名で差し替える（2026-09-23）。
+  LPOSE="${LEFT_POSE_PATH:-$REPO/config/initial_pose_left.yaml}"
+  RPOSE="${RIGHT_POSE_PATH:-$REPO/config/initial_pose_right.yaml}"
+  for _v in LEFT_POSE_PATH RIGHT_POSE_PATH; do
+    _p="${!_v:-}"
+    if [ -n "$_p" ] && [ ! -f "$_p" ]; then
+      echo "[rollout] $_v に指定した開始姿勢ファイルが無い: $_p" >&2
+      exit 1
+    fi
+  done
   [ -f "$LPOSE" ] && POSE_ARGS+=(--robot.left_arm_config.initial_pose_path="$LPOSE")
   [ -f "$RPOSE" ] && POSE_ARGS+=(--robot.right_arm_config.initial_pose_path="$RPOSE")
   if [ "$TELEOP" = "true" ]; then

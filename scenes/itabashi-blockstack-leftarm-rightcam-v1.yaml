@@ -17,7 +17,7 @@
 name: itabashi-blockstack-leftarm-rightcam-v1
 created: 2026-09-23
 measured: 2026-09-23        # 机・照明・積み木は v1 の実測を継承。右腕の姿勢と画角は収集直前に実測して埋める
-task: blockstack            # TASK は収集時に確定（v1 と同じ文は使わない＝左腕単独に変わるため）
+task: blockstack_leftarm    # 2026-09-23 確定。TASK 文は「Stack the three wooden blocks with the left arm while the right arm holds the camera steady」
 note: >
   板橋の OpenArm 両腕（chest D435i + 左右 wrist D405 の 3 眼）で「左腕だけで積み木を積む」を録る。
   **右腕は動かさず、右 wrist カメラで積む場所（接地面）を映し続けるカメラ役に徹する。**
@@ -31,7 +31,7 @@ note: >
 arm_roles:
   left: "作業。3 個すべてを左腕だけで拾って積む"
   right: "カメラ保持。動かさない。右 wrist D405 が積む場所（接地面）を映し続ける"
-  right_hold_method: TODO       # teleop_hand（人が右 leader を保持）/ jig（治具・テープで固定）。決めて記入
+  right_hold_method: teleop_hand  # 人が右 leader を保持する（治具でない・Kento 2026-09-23）
   right_pose_deg: TODO          # 固定した右腕の 7 関節角（収集直前に openarm_pose_monitor で読んで記入）
   right_view_note: TODO         # 右 wrist の画角に何が入るか（接地面・円筒・左手の指先が見えるか）
   rationale: >
