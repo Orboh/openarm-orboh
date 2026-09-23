@@ -195,6 +195,29 @@ if [ -f "$RPOSE" ]; then
 fi
 # 無い側は公式既定(肘36°)にフォールバックする。
 
+# 片腕をカメラ役で固定する（v2・2026-09-23）。FREEZE_SIDE=right にすると、その側の leader を
+# 読まずに開始姿勢 YAML の姿勢を action として送り続ける。follower は record のループ自身に
+# 保持される。**別プロセス（scripts/hold_pose.py）で保持してはいけない**——record が既に
+# その CAN バスを持っているので、2 つが同じモータに別々の目標を送り合うことになる。
+# FROZEN_GRIPPER_DEG は固定中のグリッパ位置（-65=全開・0=閉）。閉じた手が wrist カメラの
+# 画角を塞ぐ場合に開く。整列は常に較正ゼロ（閉）へピン留めするので、ここは別に指定する。
+case "${FREEZE_SIDE:-}" in
+  right)
+    [ -f "$RPOSE" ] || { echo "[record-bi] FREEZE_SIDE=right だが右の開始姿勢が無い: $RPOSE" >&2; exit 1; }
+    POSE_ARGS+=(--teleop.right_arm_config.frozen_pose_path="$RPOSE"
+                --teleop.right_arm_config.frozen_gripper_deg="${FROZEN_GRIPPER_DEG:-0}")
+    echo "[record-bi] 右腕を固定する（カメラ役・grip ${FROZEN_GRIPPER_DEG:-0}）: $RPOSE"
+    ;;
+  left)
+    [ -f "$LPOSE" ] || { echo "[record-bi] FREEZE_SIDE=left だが左の開始姿勢が無い: $LPOSE" >&2; exit 1; }
+    POSE_ARGS+=(--teleop.left_arm_config.frozen_pose_path="$LPOSE"
+                --teleop.left_arm_config.frozen_gripper_deg="${FROZEN_GRIPPER_DEG:-0}")
+    echo "[record-bi] 左腕を固定する（カメラ役・grip ${FROZEN_GRIPPER_DEG:-0}）: $LPOSE"
+    ;;
+  "") ;;
+  *) echo "[record-bi] FREEZE_SIDE は right / left / 未設定 のいずれか: '${FREEZE_SIDE}'" >&2; exit 1 ;;
+esac
+
 # run_dir の文字列だけ先に決める(ディレクトリはまだ作らない)。シーン/開始姿勢の
 # drift チェックが --collections-dir に $RUN_DIR の親を使うため、値が要る。
 TAG="${1:-untagged}"

@@ -22,6 +22,11 @@
 立ったら scripts/damiao_probe_state.py で読んで damiao_errcheck.py --clear-motor で
 解除する。
 
+**record と併用してはいけない。** record は両腕の follower に繋いで指令を出すので、
+このスクリプトを同時に走らせると同じモータへ 2 つのプロセスが別々の目標を送り合う。
+収録中の固定は record 側の FREEZE_SIDE=right で行う（scripts/record_bimanual_openarm.sh）。
+本スクリプトは収録前の画角確認など、record が走っていない場面で使う。
+
 使い方（Thor・~/projects/openarm-orboh）:
   python scripts/hold_pose.py --port can_fol_r --side right --id follower_right \
       --pose config/initial_pose_right_rightcam.yaml
