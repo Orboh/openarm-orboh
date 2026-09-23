@@ -14,9 +14,13 @@
   3. Ctrl-C で **経由地を逆順にたどって退避**してから切断する。いきなり脱力
      させると保持していた高さから机へ落ちるため。
 
-グリッパは位置 0（較正ゼロ＝閉）を kp=kd=0 で送る。電流を流さないので、
+グリッパは既定で位置 0（較正ゼロ＝閉）を kp=kd=0 で送る。電流を流さないので、
 半開き保持で立つコイル過温ラッチ(0xC)を避けられる。起動時に非ゼロの把持指令を
 出して follower gripper を壊した事故への対処とも一致する。
+--gripper で開いた位置を保持できる（-65 が全開・0 が閉）。**開いたまま保持すると
+過温ラッチの条件そのもの**なので、剛性は収集で使っている 12 を既定にし、ラッチが
+立ったら scripts/damiao_probe_state.py で読んで damiao_errcheck.py --clear-motor で
+解除する。
 
 使い方（Thor・~/projects/openarm-orboh）:
   python scripts/hold_pose.py --port can_fol_r --side right --id follower_right \
@@ -45,6 +49,13 @@ def main() -> int:
     ap.add_argument("--pose", required=True, help="開始姿勢 YAML（waypoints を含んでよい）")
     ap.add_argument("--fps", type=float, default=50.0, help="保持指令の送信レート")
     ap.add_argument("--report-s", type=float, default=5.0, help="保持誤差を出す間隔（0=出さない）")
+    ap.add_argument("--gripper", type=float, default=0.0, help="グリッパの保持位置（-65=全開・0=閉）")
+    ap.add_argument(
+        "--gripper-kp",
+        type=float,
+        default=None,
+        help="グリッパの剛性。既定は閉なら 0（無通電）、開くなら 12（収集で使う値）",
+    )
     ap.add_argument("--retreat-duration-s", type=float, default=2.2, help="退避 1 区間あたりの秒数")
     args = ap.parse_args()
 
@@ -72,10 +83,14 @@ def main() -> int:
     logger.info("Ctrl-C で経由地を逆順に退避してから切断する")
 
     action = {f"{j}.pos": float(target[j]) for j in ARM_JOINTS}
-    action["gripper.pos"] = 0.0
-    # グリッパだけ剛性ゼロ＝電流を流さない（過温ラッチ回避）。
-    custom_kp = {"gripper": 0.0}
-    custom_kd = {"gripper": 0.0}
+    action["gripper.pos"] = float(args.gripper)
+    # 閉（0）のままなら剛性ゼロ＝電流を流さない（過温ラッチ回避）。開くなら保持に
+    # 剛性が要るので、収集で使っている 12 を既定にする。
+    gkp = args.gripper_kp if args.gripper_kp is not None else (0.0 if args.gripper == 0.0 else 12.0)
+    custom_kp = {"gripper": gkp}
+    custom_kd = {"gripper": 0.0 if gkp == 0.0 else 0.2}
+    logger.info("グリッパ: 位置 %.1f  kp %.1f%s" % (
+        args.gripper, gkp, "（無通電）" if gkp == 0.0 else "（開いたまま保持＝過温ラッチに注意）"))
 
     stopping = False
 
