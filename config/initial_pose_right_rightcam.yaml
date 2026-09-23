@@ -1,0 +1,57 @@
+# OpenArm teleop start (ready) pose -- side=right, degrees (logical).
+# v2「左腕だけで積む・右腕はカメラ保持」用。2026-09-23 板橋で右 leader を手で動かし、
+# 右 wrist D405 に接地面が入る位置を探して openarm_pose_monitor の MARK で読んだ値。
+# v1 系統の rollout が使う config/initial_pose_right.yaml とは別系統。混ぜない。
+#
+# 右腕は収集中「制御で固定」する（2026-09-23 Kento 決定）。operator が leader を持ち続ける
+# 案は取らないので、保持解放で wrist roll が戻る問題は右腕には当たらない＝joint_7 = -68.5 を
+# そのまま使える。
+#
+# 経由地について: 整列は現在姿勢から目標へ関節空間を直線補間するだけで、その線が何を通るかは
+# 見ていない。通常の初期姿勢から直接このカメラ姿勢へ向かうと、肘が伸びながら J1 が 94 度
+# 振れて腕が机に激突する（2026-09-23 実機）。そこで 3 点を経由する。
+#   0 = 通常の初期姿勢（config/initial_pose_right.yaml と同値）。下からここへ寄る動きは毎日
+#       通っていて安全が分かっている。ここを飛ばすと下から直接 1 番へ向かい机に当たる
+#   1 = 肩を上げ肘を畳み、**手首を返してハンドを上に向けた**中継姿勢
+#   2 = その姿勢のまま J1 を振り切る
+#   （最終）肩と手首を戻しながら所定の画角へ降ろす
+#
+# 1 と 2 は URDF の順運動学で決めた（pinocchio。openarm_right_hand_tcp・左右の指・link7 の
+# 最低点を評価）。実測軌跡をそのまま通過点にした版は台面からの余裕が +143 mm しかなく、
+# しかも**ハンドが下向き**（ハンド z 軸の鉛直成分 -0.81）で指がその余裕を食って接触した。
+# 肩を上げて手首を返すとハンドが上を向き、余裕は +289 mm / +469 mm になる。
+# 作業台の面はロボット底板から +240 mm（table.height_mm 960 - robot_base.table_height_mm 720）。
+# 関節限界に対しては内側に寄せてある（J5=85<90・J6=40<45）ので整列時のクランプは起きない。
+#
+# gripper は較正ゼロに固定（起動時に非ゼロの把持指令を出して follower gripper を壊した
+# 事故があるため・capture_initial_pose.py の注記）。
+waypoints:
+  - joint_1: -69.38
+    joint_2: -1.5
+    joint_3: 0.26
+    joint_4: 74.73
+    joint_5: 1.04
+    joint_6: 1.11
+    joint_7: 0.0
+  - joint_1: -52.1
+    joint_2: 70.0
+    joint_3: 5.7
+    joint_4: 115.2
+    joint_5: 85.0
+    joint_6: 40.0
+    joint_7: 45.0
+  - joint_1: 14.3
+    joint_2: 70.0
+    joint_3: 18.4
+    joint_4: 71.1
+    joint_5: 85.0
+    joint_6: 40.0
+    joint_7: 45.0
+joint_1: 24.7
+joint_2: 3.0
+joint_3: 16.1
+joint_4: 41.6
+joint_5: 75.0
+joint_6: 37.7
+joint_7: -68.5
+gripper: 0.0
