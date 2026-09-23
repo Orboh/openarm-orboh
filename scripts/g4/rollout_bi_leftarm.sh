@@ -11,6 +11,8 @@
 #                run_rollout.sh は明示しないと v1 の initial_pose_right.yaml を自動で付けるので必ず渡す
 #   - カメラ   : chest / wrist_right / wrist_left の 3 眼・640x480@30（modality.json と同じ順）
 #   - gripper  : 収集と同じ kp 12（開いたまま保持すると過温ラッチ 0xC が立つ。v1 rollout で 2 回）
+#   - カメラ   : 両腕の整列が終わってから開く（右腕の整列で右 wrist のケーブルが引かれ一時的に
+#                USB から抜けるため。2026-09-24 に整列 8 回中 5 回。腕が止まると 10 秒前後で戻る）
 # 設定の出典: 2026-09-23 の収集（引き継ぎ §3）と v1 rollout R10 の max_relative_target（台帳「実行変数の変更履歴」）。
 set -euo pipefail
 MODE="${1:-}"; TAG="${2:-}"
@@ -70,4 +72,5 @@ MODEL="$MODEL" exec bash "$REPO/scripts/g4/run_rollout.sh" "bi-blockstack-leftar
   --robot.left_arm_config.max_relative_target='{joint_1: 3.4, joint_2: 1.8, joint_3: 1.4, joint_4: 2.9, joint_5: 2.9, joint_6: 2.6, joint_7: 3.9, gripper: 20.0}' \
   --lang_instruction="$LANG_TEXT" \
   --policy_host=127.0.0.1 --policy_port=5555 \
-  --dry_run=$DRY --fps=30 --max_steps=1500 --action_horizon=16 --log_obs_every_step=true
+  --dry_run=$DRY --fps=30 --max_steps=1500 --action_horizon=16 --log_obs_every_step=true \
+  --defer_camera_connect=true --camera_wait_s=30

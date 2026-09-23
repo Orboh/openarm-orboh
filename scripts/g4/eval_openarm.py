@@ -319,6 +319,14 @@ class EvalConfig:
 
     # A-2 の接続前チェックを飛ばす（自動化時のみ。実機を人が見ていない状況では使わない）
     skip_pose_confirm: bool = False
+    # カメラを開くのを「両腕の整列が終わってから」に遅らせる（2026-09-24 板橋 v2）。
+    # 右腕をカメラ役にした構成では、右腕が経由地を通って整列する大きな動きで右 wrist の
+    # ケーブルが引かれ、USB から一時的に抜ける（整列 8 回中 5 回・腕が止まると 10 秒前後で
+    # 自分から再列挙する）。整列中にカメラを開いていると、その脱落で最初の観測が古い画像になり
+    # 方策が 1 step も動かずに止まる。true にすると、整列後に RealSense のシリアルが USB 上に
+    # 見えるまで camera_wait_s 秒待ってから開く。既定 false（従来どおり connect() 内で開く）。
+    defer_camera_connect: bool = False
+    camera_wait_s: float = 30.0
 
     # 運転時のカメラ画像を定期保存する（学習分布との突き合わせ用）。
     # 2026-07-22 に「運転時の画像が学習分布から外れていたか」を後から検証できず、
@@ -562,6 +570,63 @@ class SafeRunner:
                 )
 
 
+def _stash_cameras(robot) -> list:
+    """各腕のカメラを一時的に外し、connect() でカメラを開かせない（defer_camera_connect 用）。
+
+    OpenArmFollower.connect() は self.cameras を順に開き、get_observation() も同じ dict を読む。
+    両腕版は左右の腕へ委譲するだけなので、腕ごとの dict を空にして戻せば済む。
+    """
+    arms = [robot.left_arm, robot.right_arm] if hasattr(robot, "left_arm") else [robot]
+    stash = []
+    for arm in arms:
+        stash.append((arm, dict(arm.cameras)))
+        arm.cameras = {}
+    return stash
+
+
+def _realsense_serials() -> set:
+    try:
+        import pyrealsense2 as rs
+    except ImportError:
+        return set()
+    try:
+        return {
+            d.get_info(rs.camera_info.serial_number) for d in rs.context().query_devices()
+        }
+    except Exception:
+        return set()
+
+
+def _connect_stashed_cameras(stash: list, wait_s: float) -> None:
+    """整列が終わったあとにカメラを開いて腕へ戻す。
+
+    RealSense は USB 上にシリアルが見えるまで最大 wait_s 秒待つ（見えないまま connect() を
+    呼ぶと 15 秒以上かけて ConnectionError になるため、先に列挙で確かめる）。開けたカメラだけを
+    腕へ戻すので、途中で失敗しても disconnect() が開いていないカメラを閉じに行かない。
+    """
+    for arm, cams in stash:
+        for key, cam in cams.items():
+            serial = getattr(getattr(cam, "config", None), "serial_number_or_name", None)
+            if type(cam).__name__ == "RealSenseCamera" and serial:
+                t0 = time.time()
+                while str(serial) not in _realsense_serials():
+                    if time.time() - t0 > wait_s:
+                        raise ConnectionError(
+                            f"カメラ {key}（RealSense {serial}）が {wait_s:.0f} 秒待っても USB 上に現れない。"
+                            "ケーブルの抜けを確認すること。"
+                        )
+                    time.sleep(0.5)
+                waited = time.time() - t0
+                if waited > 1.0:
+                    logging.warning(
+                        f"カメラ {key}（{serial}）は整列後 {waited:.1f} 秒で USB に戻った"
+                        "（整列の動きでケーブルが引かれて一時的に抜けていた可能性）"
+                    )
+            cam.connect()
+            arm.cameras[key] = cam
+            logging.info(f"カメラ {key} を整列後に開いた")
+
+
 @draccus.wrap()
 def eval(cfg: EvalConfig):
     init_logging()
@@ -683,7 +748,11 @@ def eval(cfg: EvalConfig):
         logging.info(f"軌道ログを記録する: {cfg.trajectory_log}")
 
     try:
+        cam_stash = _stash_cameras(robot) if cfg.defer_camera_connect else None
         robot.connect()
+        if cam_stash is not None:
+            logging.info("両腕の整列が終わった。カメラを開く（defer_camera_connect=true）")
+            _connect_stashed_cameras(cam_stash, cfg.camera_wait_s)
         log_say("Robot connected", cfg.play_sounds, blocking=True)
 
         policy = OpenArmAdapter(policy_client, bimanual=bimanual, camera_keys=camera_keys)
