@@ -65,6 +65,20 @@ fi
 # calibration_anchor: hang_down(既定・従来動作) / bump_to_stop(opt-in・自走掃引)。
 # leader は side フィールドを持たないため gravity_side でシーケンス側を明示する
 #   (bump_to_stop で side を誤ると誤ったストッパへ向かう)。
+# 較正ファイルは同じ名前へ上書きされる。上書き前に必ず退避する（2026-09-21 に右腕の 08-04 版を
+# 退避なしで上書きし、その較正で録ったモデルの組が壊れた）。学習済みモデルと組の較正は開始姿勢セット
+# （config/pose_sets/<set>/calib/）にも写しがある。
+CALIB_ROOT="${CALIB_ROOT:-$HOME/.cache/huggingface/lerobot/calibration}"
+STAMP="$(date +%Y%m%d-%H%M%S)"
+for _f in "$CALIB_ROOT/robots/openarm_follower/follower_${SIDE}.json" "$CALIB_ROOT/teleoperators/openarm_leader/leader_${SIDE}.json"; do
+  if [ -f "$_f" ]; then
+    _b="$_f.bak-$STAMP"; _k=1
+    while [ -e "$_b" ]; do _b="$_f.bak-$STAMP-$_k"; _k=$((_k+1)); done
+    cp -p "$_f" "$_b"
+    echo "[calibrate] 退避: $_b"
+  fi
+done
+
 echo "[calibrate] == follower_${SIDE} (${FOLLOWER_PORT}) anchor=${ANCHOR} =="
 "$BIN" \
   --robot.type=openarm_follower --robot.port="$FOLLOWER_PORT" \
@@ -81,7 +95,12 @@ echo "[calibrate] == leader_${SIDE} (${LEADER_PORT}) anchor=${ANCHOR} =="
   --teleop.rezero_on_connect=false --teleop.align_on_connect=false
 
 echo "[calibrate] done. connect() は以後 homing offset を使い再ゼロ焼きをスキップする(自動判定)。"
-echo "[calibrate] 開始姿勢YAMLを更新するなら: bash scripts/capture_initial_pose.sh ${SIDE}"
+# 較正が変わると、凍結済みの開始姿勢セット（前の較正で録ったデータ・モデルの組）とは座標が割れる。
+# そのセットは残したまま、新しい較正の組は新しいセットで始める。
+_cur="$(tr -d '[:space:]' < "$(cd "$(dirname "$0")/.." && pwd)/config/pose_sets/CURRENT" 2>/dev/null || true)"
+echo "[calibrate] 較正が変わった。凍結済みの開始姿勢セットは前の較正と組のまま残る（収集・推論は較正不一致で止まる）。"
+echo "[calibrate]   新しい較正で録るなら新しいセット: python3 scripts/pose_set.py new <名前> --from ${_cur:-<元のセット>} && python3 scripts/pose_set.py current <名前>"
+echo "[calibrate]   前のセットのモデルを回すときは: python3 scripts/pose_set.py restore-calib <セット>"
 if [ "$ANCHOR" = "bump_to_stop" ]; then
   echo "[calibrate] 較正後の必須確認(±0.05 rad 基準検証・電源断永続チェック):"
   echo "[calibrate]   docs/thor-bump-calibration-runbook.md 参照"

@@ -59,7 +59,7 @@ ROLLOUTS_DIR="${ROLLOUTS_DIR:-$HOME/rollouts}"
 # 以前は config/initial_pose_{left,right}.yaml（撮り直すたびに上書きされる 1 組）を自動付与していた。
 source "$(cd "$(dirname "$0")/../.." && pwd)/scripts/lib/pose_set.sh"
 pose_set_load required || exit 2
-pose_set_check_calib strict || exit 2
+pose_set_check rollout || exit 2
 if [[ -n "${MODEL:-}" && "$(realpath -m "$MODEL")" != "$(realpath -m "$PS_MODEL_DIR")" ]]; then
   if [[ "${ALLOW_MODEL_MISMATCH:-false}" != true ]]; then
     echo "ERROR: MODEL=$MODEL は POSE_SET=$POSE_SET のモデル（$PS_MODEL_DIR）と違う。承知の上なら ALLOW_MODEL_MISMATCH=true" >&2

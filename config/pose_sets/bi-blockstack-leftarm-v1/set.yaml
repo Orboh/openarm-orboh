@@ -1,19 +1,25 @@
-# 開始姿勢セット（書式は bottle-v2/set.yaml の冒頭）
+# 開始姿勢セット。scripts/pose_set.py が読み書きする（1 行 1 キー・入れ子なし）。書式と運用は config/pose_sets/README.md
 name: bi-blockstack-leftarm-v1
+status: frozen
+frozen_at: 2026-09-30 (既存モデルを後から登録)
 arms: both
-model_dir: ~/models/gr00t-bi-blockstack-leftarm-v1
-model_hf: Orboh/gr00t-bi-openarm-blockstack-leftarm-chest-wristr-wristl-v1
-dataset_hf: Orboh/bi_openarm_blockstack_leftarm_chest_wristr_wristl_v1
-collection: ~/collections/20260923T*-bi-blockstack-leftarm-v1-s*
-code_openarm_orboh: 3c6d717+dirty
-code_lerobot: 8c6ba505
+freeze_side: right
+scene: itabashi-blockstack-leftarm-rightcam-v1
+scene_sha: 7fcffc1cb9a5
+pose_left_sha: ed8b8a867a42
+pose_right_sha: 79c5f84a8a9b
 calib_follower_left: a6497c782842
-calib_leader_left: 99559b731c6e
 calib_follower_right: 63f755d3e9ad
+calib_leader_left: 99559b731c6e
 calib_leader_right: 142fc7aeb245
 calib_status: ok
-freeze_side: right
+calib_copy: calib/ に収集時の較正 4 本の写し（bi-blockstack-v1 と同一）。戻し方は bi-blockstack-v1/set.yaml
+code_openarm_orboh: 3c6d717+dirty
+code_lerobot: 8c6ba505
+datasets: Orboh/bi_openarm_blockstack_leftarm_chest_wristr_wristl_v1
+collection: ~/collections/20260923T*-bi-blockstack-leftarm-v1-s*
+model_dir: ~/models/gr00t-bi-blockstack-leftarm-v1
+model_hf: Orboh/gr00t-bi-openarm-blockstack-leftarm-chest-wristr-wristl-v1
 lang: Stack the three wooden blocks with the left arm while the right arm holds the camera steady
 rollout: scripts/g4/rollout_bi_leftarm.sh
-calib_copy: calib/ に収集時の較正 4 本の写し（bi-blockstack-v1 と同一）。戻し方は bi-blockstack-v1/set.yaml
 note: v2＝右腕はカメラ役で制御固定（right.yaml は経由地つき）。姿勢は e98c1ec と同一

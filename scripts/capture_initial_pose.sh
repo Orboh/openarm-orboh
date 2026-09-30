@@ -24,8 +24,13 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 URDF="$REPO/urdf/openarm_v10_bimanual.urdf"
 [ -n "${POSE_SET:-}" ] || { echo "[capture] POSE_SET=<新しいセット名> を指定すること（既存: $(ls "$REPO/config/pose_sets" | grep -v CURRENT | tr '\n' ' ')）" >&2; exit 1; }
 OUT="$REPO/config/pose_sets/$POSE_SET/${SIDE}.yaml"
+_status="$(sed -n 's/^status:[[:space:]]*//p' "$REPO/config/pose_sets/$POSE_SET/set.yaml" 2>/dev/null | head -1)"
+if [ -f "$REPO/config/pose_sets/$POSE_SET/set.yaml" ] && [ "${_status:-frozen}" != draft ]; then
+  echo "[capture] セット $POSE_SET は凍結済み（録ったデータ・モデルと組）。姿勢は変えない。新しいセット名で撮る" >&2
+  exit 1
+fi
 if [ -e "$OUT" ] && [ "${OVERWRITE:-false}" != true ]; then
-  echo "[capture] 既にある: $OUT（学習済みモデルと組の姿勢なら壊さない。別のセット名で撮るか、未使用と分かっていれば OVERWRITE=true）" >&2
+  echo "[capture] 既にある: $OUT（draft のセットで撮り直すなら OVERWRITE=true）" >&2
   exit 1
 fi
 mkdir -p "$(dirname "$OUT")"
@@ -45,3 +50,11 @@ echo "[capture] python=$PY  side=$SIDE  port=$PORT  out=$OUT  gravity_scale=$GSC
   --side "$SIDE" --port "$PORT" --id "leader_${SIDE}" \
   --gravity-urdf "$URDF" --gravity-side "$SIDE" --gravity-scale "$GSCALE" \
   --out "$OUT"
+
+# 撮った姿勢を下書き（draft）のセットとして登録／更新する（今の較正・コードの版も取り込む）。
+if [ -f "$REPO/config/pose_sets/$POSE_SET/set.yaml" ]; then
+  python3 "$REPO/scripts/pose_set.py" sync "$POSE_SET"
+else
+  python3 "$REPO/scripts/pose_set.py" new "$POSE_SET"
+fi
+echo "[capture] 使うなら: python3 scripts/pose_set.py current $POSE_SET"

@@ -18,7 +18,7 @@ BIN="$HOME/projects/lerobot/.venv/bin/lerobot-teleoperate"
 # セットに無い側の腕は公式既定(肘36°)にフォールバック。
 source "$REPO/scripts/lib/pose_set.sh"
 pose_set_load current || exit 1
-pose_set_check_calib warn
+pose_set_check teleop
 POSE_ARGS=()
 [ -f "$LPOSE" ] && POSE_ARGS+=(--robot.left_arm_config.initial_pose_path="$LPOSE" --teleop.left_arm_config.initial_pose_path="$LPOSE")
 [ -f "$RPOSE" ] && POSE_ARGS+=(--robot.right_arm_config.initial_pose_path="$RPOSE" --teleop.right_arm_config.initial_pose_path="$RPOSE")

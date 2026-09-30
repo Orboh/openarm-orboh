@@ -127,7 +127,8 @@ def main() -> int:
     ap.add_argument("--still-dps", type=float, default=3.0, help="静止とみなす関節速度の上限 [deg/s]（既定 3）")
     ap.add_argument("--min-dwell", type=float, default=2.0, help="静止区間とみなす最短の長さ [s]（既定 2）")
     ap.add_argument("--tol-deg", type=float, default=5.0, help="経由地を結ぶ直線と実経路の許容ずれ [deg]（既定 5）")
-    ap.add_argument("--set", help="書き出し先のセット名（config/pose_sets/<set>/）")
+    ap.add_argument("--set", help="書き出し先のセット名（config/pose_sets/<set>/・新しい名前だけ）")
+    ap.add_argument("--scene", help="このセットで録るシーン（scenes/<scene>.yaml の name・後から sync でも可）")
     ap.add_argument("--write", action="store_true", help="left/right.yaml を書き出す（無ければ確認表示のみ）")
     args = ap.parse_args()
 
@@ -186,18 +187,26 @@ def main() -> int:
     if not args.set:
         print("[dwell] --write には --set <新しいセット名> が要る", file=sys.stderr)
         return 1
-    d = REPO / "config/pose_sets" / args.set
-    for s in sides:
-        f = d / f"{s}.yaml"
-        if f.exists():
-            print(f"[dwell] 既にある: {f}（学習済みモデルと組の姿勢を壊さないため上書きしない。別名で撮る）", file=sys.stderr)
-            return 1
-    d.mkdir(parents=True, exist_ok=True)
+    import os
+    d = Path(os.environ.get("PS_ROOT", REPO / "config/pose_sets")) / args.set
+    if d.exists():
+        print(f"[dwell] 既にある: {d}（セットは作り直さない。別名で撮る）", file=sys.stderr)
+        return 1
+    d.mkdir(parents=True)
     for s in sides:
         (d / f"{s}.yaml").write_text(out[s], encoding="utf-8")
         print(f"[dwell] 書き出し: {d / f'{s}.yaml'}")
-    print(f"[dwell] 次: {d}/set.yaml を書き（モデル未学習なら model_dir 等は空でよい）、config/pose_sets/CURRENT を {args.set} にする")
-    return 0
+    # 下書き（draft）のセットとして登録する。左右を個別に決めた姿勢なので鏡像検算は外す。
+    cmd = [sys.executable, str(REPO / "scripts/pose_set.py"), "new", args.set]
+    if len(sides) == 2:
+        cmd += ["--mirror", "false"]
+    if args.scene:
+        cmd += ["--scene", args.scene]
+    import subprocess
+    rc = subprocess.run(cmd).returncode
+    if rc == 0:
+        print(f"[dwell] 使うなら: python3 scripts/pose_set.py current {args.set}")
+    return rc
 
 
 if __name__ == "__main__":

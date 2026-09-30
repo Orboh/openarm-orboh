@@ -181,7 +181,6 @@ fi
 # ので、セットが較正を記録していれば一致を必須にする（違う較正の上に同じセットを積まない）。
 source "$REPO/scripts/lib/pose_set.sh"
 pose_set_load current || exit 1
-pose_set_check_calib strict || exit 1
 LPOSE="${LEFT_POSE_PATH:-$LPOSE}"
 RPOSE="${RIGHT_POSE_PATH:-$RPOSE}"
 for _v in LEFT_POSE_PATH RIGHT_POSE_PATH; do
@@ -396,6 +395,10 @@ if [ -n "$SCENE_PATH" ]; then
   fi
 fi
 
+# 開始姿勢セットの照合（2026-09-30）。draft のセットなら今の較正・シーン・コードの版を取り込み、
+# frozen のセットなら開始姿勢・較正・シーンが凍結時と 1 つでも違えば止める（条件を変えたら新しいセット）。
+pose_set_prepare_record "$SCENE" || exit 1
+
 # 開始姿勢 YAML の drift も同様に見る。左右それぞれ独立にチェックする
 # (check-pose-drift は manifest の initial_pose と initial_pose_left の両キーを
 # stem で照合する実装済み)。
@@ -601,6 +604,9 @@ if ! "$PYTHON_BIN" "$MANIFEST_TOOL" resolve --run-dir "$RUN_DIR" --exit-code "$R
      > "$MANIFEST_RESOLVE_OUT" 2>&1; then
   echo "[record-bi] 警告: manifest の事後解決に失敗した(stamp 後 repo_id が未記録)" >> "$MANIFEST_RESOLVE_OUT"
 fi
+
+# 本番の収集でデータセットが作られたら、セットを凍結する（以後この組は変えない・2026-09-30）。
+pose_set_freeze "$RUN_DIR" 2>&1 | tee -a "$CONSOLE_LOG"
 
 {
   echo "[record-bi] lerobot-record exit=$RC"

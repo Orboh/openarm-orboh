@@ -72,7 +72,7 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 # （モデルは学習データを録った時の開始姿勢・較正と組でしか正しく動かない・2026-09-30）。
 source "$REPO/scripts/lib/pose_set.sh"
 pose_set_load required || exit 1
-pose_set_check_calib strict || exit 1
+pose_set_check rollout || exit 1
 GRAVITY_URDF="${GRAVITY_URDF:-$REPO/urdf/openarm_v10_bimanual.urdf}"
 
 # ---- Binary resolution (teleop venv → conda lerobot env) ----------------------

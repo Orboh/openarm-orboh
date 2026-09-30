@@ -1,16 +1,22 @@
-# 開始姿勢セット（書式は bottle-v2/set.yaml の冒頭）
+# 開始姿勢セット。scripts/pose_set.py が読み書きする（1 行 1 キー・入れ子なし）。書式と運用は config/pose_sets/README.md
 name: bi-blockstack-v1
+status: frozen
+frozen_at: 2026-09-30 (既存モデルを後から登録)
 arms: both
-model_dir: ~/models/gr00t-bi-blockstack-v1
-model_hf: Orboh/gr00t-bi-openarm-blockstack-chest-wristr-wristl-v1
-dataset_hf: Orboh/bi_openarm_blockstack_chest_wristr_wristl_v1
-collection: ~/collections/20260922T*-bi-blockstack-v1-s*
-code_openarm_orboh: 3c6d717+dirty
-code_lerobot: 8c6ba505
+scene: itabashi-blockstack-v1
+scene_sha: 39463d6dd40b
+pose_left_sha: ed8b8a867a42
+pose_right_sha: b0c565ea9852
 calib_follower_left: a6497c782842
-calib_leader_left: 99559b731c6e
 calib_follower_right: 63f755d3e9ad
+calib_leader_left: 99559b731c6e
 calib_leader_right: 142fc7aeb245
 calib_status: ok
 calib_copy: calib/ に収集時の較正 4 本の写し（2026-09-21〜22 bump-to-stop）。較正を作り直した後にこのモデルを回すなら、これを ~/.cache/huggingface/lerobot/calibration/ の該当位置へ戻す
+code_openarm_orboh: 3c6d717+dirty
+code_lerobot: 8c6ba505
+datasets: Orboh/bi_openarm_blockstack_chest_wristr_wristl_v1
+collection: ~/collections/20260922T*-bi-blockstack-v1-s*
+model_dir: ~/models/gr00t-bi-blockstack-v1
+model_hf: Orboh/gr00t-bi-openarm-blockstack-chest-wristr-wristl-v1
 note: 収集時の openarm-orboh は Thor の wip ブランチ 3c6d717 に feat/bimanual-collection 相当の差分を stage した状態（commit 無し）。姿勢は 571a4f4 と同一
