@@ -1,0 +1,11 @@
+# OpenArm teleop start (ready) pose -- side=right, degrees.
+# Captured by scripts/capture_initial_pose.py. Consumed by align_on_connect
+# via --...initial_pose_path. gripper pinned to calibration zero.
+joint_1: -19.89
+joint_2: 15.49
+joint_3: -27.04
+joint_4: 74.14
+joint_5: -10.96
+joint_6: 0.22
+joint_7: 1.0
+gripper: 0.0

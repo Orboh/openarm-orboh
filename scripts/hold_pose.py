@@ -29,7 +29,7 @@
 
 使い方（Thor・~/projects/openarm-orboh）:
   python scripts/hold_pose.py --port can_fol_r --side right --id follower_right \
-      --pose config/initial_pose_right_rightcam.yaml
+      --pose config/pose_sets/bi-blockstack-leftarm-v1/right.yaml
 """
 
 from __future__ import annotations

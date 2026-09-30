@@ -207,8 +207,11 @@ def main() -> int:
         args.interval = 0.2
 
     offsets = {i: load_offsets(UNIT[i][2]) for i in args.ifaces if i in UNIT}
-    yaml_pose = {"left": load_yaml_pose(REPO / "config/initial_pose_left.yaml"),
-                 "right": load_yaml_pose(REPO / "config/initial_pose_right.yaml")}
+    # 比較対象の開始姿勢は開始姿勢セット（env POSE_SET・未指定なら config/pose_sets/CURRENT）
+    ps_root = REPO / "config/pose_sets"
+    ps_name = os.environ.get("POSE_SET") or (ps_root / "CURRENT").read_text().strip()
+    yaml_pose = {"left": load_yaml_pose(ps_root / ps_name / "left.yaml"),
+                 "right": load_yaml_pose(ps_root / ps_name / "right.yaml")}
     for i in args.ifaces:
         if i not in UNIT:
             print(f"未知の IF: {i}（{', '.join(UNIT)} のいずれか）", file=sys.stderr)

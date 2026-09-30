@@ -1,0 +1,15 @@
+# 開始姿勢セット: 1 モデル = 1 セット。学習データを録った時の開始姿勢・較正・コードの組。
+# scripts/lib/pose_set.sh が読む（1 行 1 キーの key: value だけ・入れ子なし）。
+name: bottle-v2
+arms: right
+model_dir: ~/models/gr00t-bottle-v2
+model_hf: Orboh/gr00t-openarm-bottle-pnp-chest-v2
+dataset_hf: Orboh/openarm_bottle_pnp_chest_v2
+collection: ~/collections/20260806T*-bottle-v2-s*
+code_openarm_orboh: ea72b032
+code_lerobot: 7b9190a9
+calib_follower_right: e10d7359dd82
+calib_leader_right: 12a33845e541
+calib_status: lost
+calib_copy: calib/ に leader_right.json（12a33845・Vector の較正フォルダに残っていた写し）だけを置く。follower_right（e10d7359）の写しは Thor・Vector のどこにも無い
+note: 右腕の較正ファイル（2026-08-04 版）は 2026-09-21 の bump 較正で上書きされ現存しない。今の較正のままでは収集時と同じ座標で再生できない

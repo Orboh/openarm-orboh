@@ -173,12 +173,17 @@ if [ -n "$DISPLAY_IP" ] && [ -n "$DISPLAY_PORT" ]; then
 fi
 
 # ---- Start pose alignment (左右それぞれキャプチャ済みなら使う) -----------------
-# 既定は config/initial_pose_<side>.yaml。LEFT_POSE_PATH / RIGHT_POSE_PATH で差し替えられる
+# 既定は開始姿勢セットの left/right.yaml。LEFT_POSE_PATH / RIGHT_POSE_PATH で差し替えられる
 # （2026-09-23・v2 で右腕をカメラ役に固定するため右だけ別ファイルにする用途）。**明示したのに
 # ファイルが無いときは黙って公式既定(肘36°)へ落ちず、ここで落とす**——開始姿勢が収集と推論で
 # 割れるのは発覚が最も遅い種類の事故で、フォールバックさせてよい場面ではない。
-LPOSE="${LEFT_POSE_PATH:-$REPO/config/initial_pose_left.yaml}"
-RPOSE="${RIGHT_POSE_PATH:-$REPO/config/initial_pose_right.yaml}"
+# 既定は開始姿勢セット（POSE_SET・未指定なら config/pose_sets/CURRENT）。収集は「今の較正で録る」
+# ので、セットが較正を記録していれば一致を必須にする（違う較正の上に同じセットを積まない）。
+source "$REPO/scripts/lib/pose_set.sh"
+pose_set_load current || exit 1
+pose_set_check_calib strict || exit 1
+LPOSE="${LEFT_POSE_PATH:-$LPOSE}"
+RPOSE="${RIGHT_POSE_PATH:-$RPOSE}"
 for _v in LEFT_POSE_PATH RIGHT_POSE_PATH; do
   _p="${!_v:-}"
   if [ -n "$_p" ] && [ ! -f "$_p" ]; then
@@ -529,7 +534,7 @@ COMMAND_SH="$RUN_DIR/command.sh"
   printf 'RESUME=%q DATASET_ROOT=%q \\\n' "$RESUME" "$DATASET_ROOT"
   # 開始姿勢ファイルと片腕凍結も残す（2026-09-23）。v2 は右腕を RIGHT_POSE_PATH + FREEZE_SIDE で
   # カメラ役に固定するので、これが無い command.sh を再実行すると右腕が既定姿勢で普通にテレオペされる。
-  printf 'LEFT_POSE_PATH=%q RIGHT_POSE_PATH=%q \\\n' "$LPOSE" "$RPOSE"
+  printf 'POSE_SET=%q LEFT_POSE_PATH=%q RIGHT_POSE_PATH=%q \\\n' "$POSE_SET" "$LPOSE" "$RPOSE"
   printf 'FREEZE_SIDE=%q FROZEN_GRIPPER_DEG=%q \\\n' "${FREEZE_SIDE:-}" "${FROZEN_GRIPPER_DEG:-}"
   printf 'PLAY_SOUNDS=%q DISPLAY_IP=%q DISPLAY_PORT=%q \\\n' "$PLAY_SOUNDS" "$DISPLAY_IP" "$DISPLAY_PORT"
   printf 'D405_GAIN=%q D405_EXPOSURE=%q D435_BRIGHTNESS=%q \\\n' "${D405_GAIN:-}" "${D405_EXPOSURE:-}" "${D435_BRIGHTNESS:-}"

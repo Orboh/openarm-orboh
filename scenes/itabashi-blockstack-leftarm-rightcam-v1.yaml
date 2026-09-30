@@ -32,7 +32,7 @@ arm_roles:
   left: "作業。3 個すべてを左腕だけで拾って積む"
   right: "カメラ保持。動かさない。右 wrist D405 が積む場所（接地面）を映し続ける"
   right_hold_method: program_hold  # 制御で固定する（2026-09-23 Kento 決定。人が leader を持ち
-    # 続ける案は取らない）。scripts/hold_pose.py が config/initial_pose_right_rightcam.yaml の
+    # 続ける案は取らない）。scripts/hold_pose.py が config/pose_sets/bi-blockstack-leftarm-v1/right.yaml の
     # 姿勢へ経由地をたどって上がり、そのまま位置指令で保持し続ける。Ctrl-C では経由地を逆順に
     # 退避してから切るので、止めても腕が机へ落ちない。
     # 人保持を採らなかった理由: leader の wrist roll は重力フィードフォワードが釣り合わず
@@ -40,7 +40,7 @@ arm_roles:
     # 50 本ぶん画のロールが毎回ぶれる。
   right_pose_deg: [24.7, 3.0, 16.1, 41.6, 75.0, 37.7, -68.5]   # logical [deg]・J1..J7
     # 2026-09-23 板橋。右 leader を手で動かして画角を決め、openarm_pose_monitor の MARK で
-    # 右 follower の logical を読んだ値。正本は config/initial_pose_right_rightcam.yaml
+    # 右 follower の logical を読んだ値。正本は config/pose_sets/bi-blockstack-leftarm-v1/right.yaml
     # （経由地つき。下から直接この姿勢へ向かうと腕が机に激突するため）。
   right_gripper_deg: -65        # 開いた状態で保持する（閉じた指が右 wrist の画角を塞ぐため）。
     # 剛性は 12（収集で使う値）。開いたままの保持はコイル過温ラッチ(0xC)が立つ条件なので、
@@ -138,7 +138,7 @@ camera_mount:
       arm_roles.right_pose_deg で固定したときの向き。手首を返して接地面を斜め上から見下ろす。
       画は鉛直基準から回っているが、**50 本すべてで同じであれば学習上は問題にしない**
       （要件は「上が上」ではなく「毎回同じ」）。向きの正本は
-      config/initial_pose_right_rightcam.yaml の関節角。
+      config/pose_sets/bi-blockstack-leftarm-v1/right.yaml の関節角。
     view_note: >
       接地面・拾う位置の積み木 3 個・左腕の手先とグリッパ・積み上がる高さ方向。机の縁と背景も入る。
       収集中この腕は動かさない（program_hold）ので、画角は全エピソードで同一になる。

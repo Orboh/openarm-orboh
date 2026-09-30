@@ -14,10 +14,11 @@ EXTRA_ARGS=("${@:3}")
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 URDF="$REPO/urdf/openarm_v10_bimanual.urdf"
 BIN="$HOME/projects/lerobot/.venv/bin/lerobot-teleoperate"
-# 開始姿勢: 左右それぞれキャプチャ済み(scripts/capture_initial_pose.sh left|right)なら
-# 各腕の整列先に使う。未キャプチャの腕は公式既定(肘36°)にフォールバック。
-LPOSE="$REPO/config/initial_pose_left.yaml"
-RPOSE="$REPO/config/initial_pose_right.yaml"
+# 開始姿勢: 開始姿勢セット（config/pose_sets/<POSE_SET>/・未指定なら CURRENT）の left/right.yaml。
+# セットに無い側の腕は公式既定(肘36°)にフォールバック。
+source "$REPO/scripts/lib/pose_set.sh"
+pose_set_load current || exit 1
+pose_set_check_calib warn
 POSE_ARGS=()
 [ -f "$LPOSE" ] && POSE_ARGS+=(--robot.left_arm_config.initial_pose_path="$LPOSE" --teleop.left_arm_config.initial_pose_path="$LPOSE")
 [ -f "$RPOSE" ] && POSE_ARGS+=(--robot.right_arm_config.initial_pose_path="$RPOSE" --teleop.right_arm_config.initial_pose_path="$RPOSE")

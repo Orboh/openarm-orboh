@@ -474,6 +474,15 @@ def cmd_check_drift(args: argparse.Namespace) -> int:
     return 0
 
 
+def _pose_key(path: Path) -> str:
+    """開始姿勢ファイルの照合キー。開始姿勢セット（config/pose_sets/<set>/<side>.yaml・2026-09-30〜）は
+    "<set>/<side>"、それ以前の固定名（config/initial_pose_<side>.yaml）は stem。セットのファイル名は
+    どれも left/right なので、stem だけで照合すると別セットの run と比べてしまう。"""
+    if path.parent.parent.name == "pose_sets":
+        return f"{path.parent.name}/{path.stem}"
+    return path.stem
+
+
 def cmd_check_pose_drift(args: argparse.Namespace) -> int:
     """同じ開始姿勢ファイルで前に録った run と sha が一致するかを見る。
 
@@ -487,7 +496,7 @@ def cmd_check_pose_drift(args: argparse.Namespace) -> int:
     current = _sha256(pose_path)
     if not current:
         return 0
-    name = pose_path.stem
+    name = _pose_key(pose_path)
 
     root = Path(args.collections_dir).expanduser()
     if not root.is_dir():
@@ -503,7 +512,7 @@ def cmd_check_pose_drift(args: argparse.Namespace) -> int:
         for key in ("initial_pose", "initial_pose_left"):
             cand = m.get(key) or {}
             cand_path = cand.get("path")
-            if cand_path and Path(cand_path).stem == name and cand.get("sha256"):
+            if cand_path and _pose_key(Path(cand_path)) == name and cand.get("sha256"):
                 pose = cand
                 break
         if pose is None:

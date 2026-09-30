@@ -1,0 +1,14 @@
+# 開始姿勢セット（書式は bottle-v2/set.yaml の冒頭）
+name: tape-v1
+arms: right
+model_dir: ~/models/gr00t-tape-pnp-v1
+model_hf: unknown
+dataset_hf: Orboh/openarm_tape_pnp_chest_wrist_v1
+collection: ~/collections/20260905T*-tape-v1-s*
+code_openarm_orboh: 4eec8a02
+code_lerobot: 927b387b
+calib_follower_right: e10d7359dd82
+calib_leader_right: 12a33845e541
+calib_status: lost
+calib_copy: calib/ は bottle-v2 と同じ leader_right.json。follower_right は現存しない
+note: Kota 収集（鹿児島 2026-09-05）。較正は bottle-v2 と同じ 2026-08-04 版で、現存しない。モデルの HF 名は Vault に記録が無い

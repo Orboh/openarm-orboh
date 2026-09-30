@@ -7,8 +7,8 @@
 #
 # 学習と揃えるもの（ここを 1 文字でも変えると条件が割れる）:
 #   - 指示文   : データセットの single_task と一字一句同じ（LANG）
-#   - 右腕     : 収集と同じカメラ役の姿勢 config/initial_pose_right_rightcam.yaml（経由地つき）。
-#                run_rollout.sh は明示しないと v1 の initial_pose_right.yaml を自動で付けるので必ず渡す
+#   - 開始姿勢 : 開始姿勢セット bi-blockstack-leftarm-v1（config/pose_sets/・右腕はカメラ役で経由地つき）。
+#                モデル・較正・指示文もセットと照合される（run_rollout.sh の POSE_SET guard）
 #   - カメラ   : chest / wrist_right / wrist_left の 3 眼・640x480@30（modality.json と同じ順）
 #   - gripper  : 収集と同じ kp 12（開いたまま保持すると過温ラッチ 0xC が立つ。v1 rollout で 2 回）
 #   - カメラ   : 両腕の整列が終わってから開く（右腕の整列で右 wrist のケーブルが引かれ一時的に
@@ -17,7 +17,10 @@
 set -euo pipefail
 MODE="${1:-}"; TAG="${2:-}"
 REPO="$HOME/projects/openarm-orboh"
-MODEL="${MODEL:-$HOME/models/gr00t-bi-blockstack-leftarm-v1}"
+export POSE_SET=bi-blockstack-leftarm-v1
+source "$REPO/scripts/lib/pose_set.sh"
+pose_set_load required || exit 1
+MODEL="${MODEL:-$PS_MODEL_DIR}"
 LANG_TEXT="Stack the three wooden blocks with the left arm while the right arm holds the camera steady"
 export OPENARM_EMBODIMENT=bimanual
 export OPENARM_CAMERAS=chest,wrist_right,wrist_left
@@ -46,16 +49,13 @@ case "$MODE" in
 esac
 
 [ -n "$TAG" ] || TAG="$MODE"
-RPOSE="$REPO/config/initial_pose_right_rightcam.yaml"
-LPOSE="$REPO/config/initial_pose_left.yaml"
-for f in "$RPOSE" "$LPOSE"; do [ -f "$f" ] || { echo "開始姿勢が無い: $f" >&2; exit 1; }; done
 DRY=false; [ "$MODE" = dry ] && DRY=true
 KP="[240,240,240,240,24,31,25,12]"
 CAMS='{"chest": {"type":"intelrealsense","serial_number_or_name":"344422070898","width":640,"height":480,"fps":30}, "wrist_right": {"type":"intelrealsense","serial_number_or_name":"352122273417","width":640,"height":480,"fps":30}, "wrist_left": {"type":"intelrealsense","serial_number_or_name":"409122272149","width":640,"height":480,"fps":30}}'
 
 echo "[rollout-bi-leftarm] mode=$MODE tag=$TAG model=$MODEL"
 echo "[rollout-bi-leftarm] lang='$LANG_TEXT'"
-echo "[rollout-bi-leftarm] 右腕の開始姿勢=$RPOSE（カメラ役・経由地つき）"
+echo "[rollout-bi-leftarm] 開始姿勢セット=$POSE_SET（右腕はカメラ役・経由地つき）"
 echo "[rollout-bi-leftarm] 接続すると両腕が自走して開始姿勢へ整列する。両腕と机から手を引くこと"
 
 MODEL="$MODEL" exec bash "$REPO/scripts/g4/run_rollout.sh" "bi-blockstack-leftarm-$TAG" -- \
@@ -64,8 +64,6 @@ MODEL="$MODEL" exec bash "$REPO/scripts/g4/run_rollout.sh" "bi-blockstack-leftar
   --robot.right_arm_config.port=can_fol_r --robot.right_arm_config.side=right \
   --robot.id=follower \
   --robot.cameras="$CAMS" \
-  --robot.left_arm_config.initial_pose_path="$LPOSE" \
-  --robot.right_arm_config.initial_pose_path="$RPOSE" \
   --robot.left_arm_config.position_kp="$KP" \
   --robot.right_arm_config.position_kp="$KP" \
   --robot.right_arm_config.max_relative_target='{joint_1: 2.8, joint_2: 2.8, joint_3: 2.0, joint_4: 3.5, joint_5: 4.2, joint_6: 3.2, joint_7: 5.5, gripper: 20.0}' \

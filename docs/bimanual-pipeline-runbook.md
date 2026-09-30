@@ -2,6 +2,8 @@
 
 # 両腕 OpenArm × GR00T 手順書（収集 → v3→v2 変換 → EC2 FT → Thor rollout）
 
+> 2026-09-30: 開始姿勢 YAML は `config/initial_pose_{left,right}.yaml` から開始姿勢セット `config/pose_sets/<set>/{left,right}.yaml` へ移した（`scripts/lib/pose_set.sh`）。本書の旧パスは 09-21 当時の記録。
+
 起案日 2026-09-21。対象は Vector で編集した feat/bimanual-collection（openarm-orboh）と feat/openarm-remote-teleop（lerobot fork・BiOpenArmLeader.soft_move_to 追加）の実機投入。両腕経路は全段で実機未検証なので、各段の「初回だけやる検証」を飛ばさない。以下、絶対パスは Thor と EC2 のものも `~` を各マシンの HOME として読む。
 
 ---

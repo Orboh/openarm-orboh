@@ -145,7 +145,10 @@ DISPLAY_DATA="${DISPLAY_DATA:-true}"        # set false for headless dry-run
 #   - 収集セッションを跨ぐ場合も同じ ready YAML を使い続ける(較正=恒久ゼロ +
 #     同一 YAML で、セッション間の座標系ずれ・開始姿勢ずれの両方を防ぐ)。
 # REPO は冒頭で解決済み。
-POSE="$REPO/config/initial_pose_${SIDE}.yaml"
+source "$REPO/scripts/lib/pose_set.sh"
+pose_set_load current || exit 1
+pose_set_check_calib strict || exit 1
+if [ "$SIDE" = left ]; then POSE="$LPOSE"; else POSE="$RPOSE"; fi
 POSE_ARGS=()
 if [ -f "$POSE" ]; then
   POSE_ARGS+=(--robot.initial_pose_path="$POSE")

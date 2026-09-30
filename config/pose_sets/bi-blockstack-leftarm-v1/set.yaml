@@ -1,0 +1,19 @@
+# 開始姿勢セット（書式は bottle-v2/set.yaml の冒頭）
+name: bi-blockstack-leftarm-v1
+arms: both
+model_dir: ~/models/gr00t-bi-blockstack-leftarm-v1
+model_hf: Orboh/gr00t-bi-openarm-blockstack-leftarm-chest-wristr-wristl-v1
+dataset_hf: Orboh/bi_openarm_blockstack_leftarm_chest_wristr_wristl_v1
+collection: ~/collections/20260923T*-bi-blockstack-leftarm-v1-s*
+code_openarm_orboh: 3c6d717+dirty
+code_lerobot: 8c6ba505
+calib_follower_left: a6497c782842
+calib_leader_left: 99559b731c6e
+calib_follower_right: 63f755d3e9ad
+calib_leader_right: 142fc7aeb245
+calib_status: ok
+freeze_side: right
+lang: Stack the three wooden blocks with the left arm while the right arm holds the camera steady
+rollout: scripts/g4/rollout_bi_leftarm.sh
+calib_copy: calib/ に収集時の較正 4 本の写し（bi-blockstack-v1 と同一）。戻し方は bi-blockstack-v1/set.yaml
+note: v2＝右腕はカメラ役で制御固定（right.yaml は経由地つき）。姿勢は e98c1ec と同一
