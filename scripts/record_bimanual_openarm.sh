@@ -312,6 +312,10 @@ MANIFEST_TOOL="$REPO/scripts/collect_manifest.py"
 # すると、生きている側の姿勢ミスを拾う機能まで一緒に殺すことになる。
 if [ -n "${FREEZE_SIDE:-}" ]; then
   echo "[record-bi] 鏡像チェックは省略する（FREEZE_SIDE=$FREEZE_SIDE で意図的に非対称）"
+elif [ "$(pose_set_get mirror)" = false ] && [ -z "${LEFT_POSE_PATH:-}${RIGHT_POSE_PATH:-}" ]; then
+  # テレオペで左右それぞれ自由に決めた開始姿勢（scripts/pose_from_dwell.py）は鏡像にならない。
+  # セットの set.yaml に mirror: false と書いたものだけ省く（毎回 ALLOW_ASYM_POSE で押し通さない）。
+  echo "[record-bi] 鏡像チェックは省略する（セット $POSE_SET は mirror: false＝左右を個別に決めた姿勢）"
 elif [ -f "$LPOSE" ] && [ -f "$RPOSE" ]; then
   POSE_MIRROR_TOL_DEG="${POSE_MIRROR_TOL_DEG:-2.0}"
   MIRROR_CHECK_OUT="$("$PYTHON_BIN" - "$LPOSE" "$RPOSE" "$POSE_MIRROR_TOL_DEG" <<'PYEOF'
