@@ -127,6 +127,8 @@ def main() -> int:
     ap.add_argument("--still-dps", type=float, default=3.0, help="静止とみなす関節速度の上限 [deg/s]（既定 3）")
     ap.add_argument("--min-dwell", type=float, default=2.0, help="静止区間とみなす最短の長さ [s]（既定 2）")
     ap.add_argument("--tol-deg", type=float, default=5.0, help="経由地を結ぶ直線と実経路の許容ずれ [deg]（既定 5）")
+    ap.add_argument("--since", type=float, default=None,
+                    help="この t_rel [s] より後だけを見る（同じ記録に起動時の整列が入っているとき、整列中の静止を拾わないため）")
     ap.add_argument("--align-speed", type=float, default=40.0,
                     help="起動時の整列の最大関節速度 [deg/s]（YAML の align.max_speed_dps・既定 40＝公式の 2.2s/約 90° 相当）")
     ap.add_argument("--set", help="書き出し先のセット名（config/pose_sets/<set>/・新しい名前だけ）")
@@ -136,6 +138,10 @@ def main() -> int:
 
     sides = [s.strip() for s in args.sides.split(",") if s.strip()]
     ts, q = load(args.csv.expanduser(), args.unit, sides)
+    if args.since is not None:
+        keep = [i for i, t in enumerate(ts) if t >= args.since]
+        ts = [ts[i] for i in keep]
+        q = {s: [q[s][i] for i in keep] for s in sides}
     if len(ts) < 10:
         print(f"[dwell] 使える行が少ない（{len(ts)} 時刻）。{args.unit} の {sides} が記録されているか確認する", file=sys.stderr)
         return 1
