@@ -26,6 +26,7 @@ POSE_ARGS=()
   --robot.type=bi_openarm_follower \
   --robot.left_arm_config.port=can_fol_l --robot.left_arm_config.side=left \
   --robot.right_arm_config.port=can_fol_r --robot.right_arm_config.side=right \
+  --robot.left_arm_config.align_gravity_urdf_path="$URDF" --robot.right_arm_config.align_gravity_urdf_path="$URDF" \
   --robot.id=follower \
   --teleop.type=bi_openarm_leader \
   --teleop.left_arm_config.port=can_lead_l \

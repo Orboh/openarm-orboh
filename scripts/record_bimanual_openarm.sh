@@ -113,6 +113,14 @@ GRAVITY_COMP="${GRAVITY_COMP:-true}"
 LSCALE="${LSCALE:-1.0}"
 RSCALE="${RSCALE:-1.0}"
 GRAVITY_URDF="${GRAVITY_URDF:-$REPO/urdf/openarm_v10_bimanual.urdf}"
+# follower の起動時の整列に重力補償を足す（2026-10-01・lerobot 7afe1623）。無いと整列の弱いゲインで
+# 重力の分（肩で約 6°）下がって終わり、ループ開始で跳ね上がる。ALIGN_GRAVITY=false で従来どおり。
+ALIGN_GRAVITY="${ALIGN_GRAVITY:-true}"
+ALIGN_GRAVITY_ARGS=()
+if [ "$ALIGN_GRAVITY" = "true" ]; then
+  ALIGN_GRAVITY_ARGS+=(--robot.left_arm_config.align_gravity_urdf_path="$GRAVITY_URDF"
+                       --robot.right_arm_config.align_gravity_urdf_path="$GRAVITY_URDF")
+fi
 
 # ---- Follower gripper kp (熱対策) --------------------------------------------
 # 2026-09-21 板橋: 木材/積み木の握り込みで follower gripper(dm4310) がコイル過温ラッチ
@@ -547,7 +555,7 @@ COMMAND_SH="$RUN_DIR/command.sh"
   printf 'D405_GAIN=%q D405_EXPOSURE=%q D435_BRIGHTNESS=%q \\\n' "${D405_GAIN:-}" "${D405_EXPOSURE:-}" "${D435_BRIGHTNESS:-}"
   printf 'TASK=%q \\\n' "$TASK"
   printf 'TASK_SLUG=%q \\\n' "$TASK_SLUG"
-  printf 'GRAVITY_COMP=%q LSCALE=%q RSCALE=%q GRAVITY_URDF=%q \\\n' "$GRAVITY_COMP" "$LSCALE" "$RSCALE" "$GRAVITY_URDF"
+  printf 'GRAVITY_COMP=%q LSCALE=%q RSCALE=%q GRAVITY_URDF=%q ALIGN_GRAVITY=%q \\\n' "$GRAVITY_COMP" "$LSCALE" "$RSCALE" "$GRAVITY_URDF" "$ALIGN_GRAVITY"
   printf 'GRIPPER_KP=%q ARM_KP=%q \\\n' "$GRIPPER_KP" "$ARM_KP"
   printf 'EPISODE_ADVANCE=%q START_POSE_TOL_DEG=%q START_POSE_MAX_WAIT_S=%q \\\n' \
     "$EPISODE_ADVANCE" "$START_POSE_TOL_DEG" "$START_POSE_MAX_WAIT_S"
@@ -576,6 +584,7 @@ set +e
   --robot.type=bi_openarm_follower \
   --robot.left_arm_config.port="$FOLLOWER_L" --robot.left_arm_config.side=left \
   --robot.right_arm_config.port="$FOLLOWER_R" --robot.right_arm_config.side=right \
+  ${ALIGN_GRAVITY_ARGS[@]+"${ALIGN_GRAVITY_ARGS[@]}"} \
   --robot.id=follower \
   --robot.cameras="$CAMERAS" \
   --teleop.type=bi_openarm_leader \
