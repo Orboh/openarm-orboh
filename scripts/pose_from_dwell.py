@@ -115,6 +115,35 @@ def max_dev(points, idx):
     return worst
 
 
+def side_limits(side: str) -> dict[str, tuple[float, float]] | None:
+    """lerobot の左右の既定可動域（follower と leader が共有）。lerobot が import できなければ None。"""
+    try:
+        from lerobot.robots.openarm_follower.config_openarm_follower import (
+            LEFT_DEFAULT_JOINTS_LIMITS, RIGHT_DEFAULT_JOINTS_LIMITS)
+    except Exception:
+        return None
+    return LEFT_DEFAULT_JOINTS_LIMITS if side == "left" else RIGHT_DEFAULT_JOINTS_LIMITS
+
+
+def limit_warnings(side: str, pose: list[float], wps: list[list[float]], path: list[list[float]],
+                   margin: float, wrist_max: float) -> list[str]:
+    """開始姿勢・経由地が可動域の端から margin 以内、経路中の手首ロール J7 が wrist_max 超を警告する（止めない）。"""
+    out: list[str] = []
+    lim = side_limits(side)
+    if lim is None:
+        return ["可動域を読めない（lerobot の venv で実行すると検査できる）"]
+    for label, q in [("開始姿勢", pose)] + [(f"経由地 {k}", w) for k, w in enumerate(wps)]:
+        for i, v in enumerate(q):
+            lo, hi = lim[f"joint_{i + 1}"]
+            m = min(v - lo, hi - v)
+            if m < margin:
+                out.append(f"{label} J{i + 1}={v:.1f} が可動域 [{lo:.0f}, {hi:.0f}] の端まで {m:.1f}°（目安 {margin:.0f}° 以上）")
+    j7 = max((abs(p[6]) for p in path), default=0.0)
+    if j7 > wrist_max:
+        out.append(f"経路中に手首ロール J7 が {j7:.1f}° まで回った（目安 {wrist_max:.0f}° 以下。持ち手をねじると経由地が増え、起動のたびに手首が回る）")
+    return out
+
+
 def fmt_pose(vals: list[float], indent: str = "") -> str:
     return "".join(f"{indent}joint_{i + 1}: {v:.2f}\n" for i, v in enumerate(vals))
 
@@ -127,6 +156,8 @@ def main() -> int:
     ap.add_argument("--still-dps", type=float, default=3.0, help="静止とみなす関節速度の上限 [deg/s]（既定 3）")
     ap.add_argument("--min-dwell", type=float, default=2.0, help="静止区間とみなす最短の長さ [s]（既定 2）")
     ap.add_argument("--tol-deg", type=float, default=5.0, help="経由地を結ぶ直線と実経路の許容ずれ [deg]（既定 5）")
+    ap.add_argument("--limit-margin", type=float, default=5.0, help="可動域の端からの余裕の目安 [deg]（下回ると警告・既定 5）")
+    ap.add_argument("--wrist-max", type=float, default=60.0, help="経路中の手首ロール J7 の目安 [deg]（超えると警告・既定 60）")
     ap.add_argument("--since", type=float, default=None,
                     help="この t_rel [s] より後だけを見る（同じ記録に起動時の整列が入っているとき、整列中の静止を拾わないため）")
     ap.add_argument("--align-speed", type=float, default=40.0,
@@ -184,6 +215,8 @@ def main() -> int:
         print(f"        経由地 {len(wps)} 点（実経路との最大ずれ {max_dev(path, idx) if idx else 0:.1f}° ≤ {args.tol_deg}°）")
         for k, w in enumerate(wps):
             print(f"          {k}: " + " ".join(f"{v:7.2f}" for v in w))
+        for wmsg in limit_warnings(s, pose, wps, path, args.limit_margin, args.wrist_max):
+            print(f"        ⚠ {wmsg}")
         stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
         body = (f"# OpenArm 開始姿勢 -- side={s}, degrees (logical・{args.unit})。\n"
                 f"# {stamp} scripts/pose_from_dwell.py で生成: {args.csv.name} の一番長い静止区間 "
