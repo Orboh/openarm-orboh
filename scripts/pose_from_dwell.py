@@ -150,7 +150,14 @@ def main() -> int:
     if len(ranked) > 1 and (ts[ranked[1][1]] - ts[ranked[1][0]]) > 0.8 * (ts[best[1]] - ts[best[0]]):
         print("[dwell] ⚠ 2 番目の静止区間が 1 番目と近い長さ。意図した姿勢か上の時刻で確かめる")
 
-    prev = [s for s in segs if s[1] < best[0]]
+    # 直前の静止区間のうち、開始姿勢と各関節 --tol-deg 以内のもの（止める直前の微調整）は開始姿勢の一部として飛ばし、
+    # それより前の「別の構え」で止めた区間の終わりを経路の頭にする（2026-10-01 実測: 微調整の 3.8s 静止で経路を取りこぼした）
+    def seg_pose(seg, side):
+        return [statistics.median(c) for c in zip(*q[side][seg[0]:seg[1] + 1])]
+    best_pose = {s: seg_pose(best, s) for s in sides}
+    def near(seg):
+        return all(abs(a - b) <= args.tol_deg for s in sides for a, b in zip(seg_pose(seg, s), best_pose[s]))
+    prev = [s for s in segs if s[1] < best[0] and not near(s)]
     p0 = prev[-1][1] if prev else 0
     p1 = best[0]
     print(f"[dwell] 経路 = t={ts[p0]:.1f}〜{ts[p1]:.1f}s（{'直前の静止区間の終わりから' if prev else '記録の頭から'}）")
