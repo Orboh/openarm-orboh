@@ -127,6 +127,8 @@ def main() -> int:
     ap.add_argument("--still-dps", type=float, default=3.0, help="静止とみなす関節速度の上限 [deg/s]（既定 3）")
     ap.add_argument("--min-dwell", type=float, default=2.0, help="静止区間とみなす最短の長さ [s]（既定 2）")
     ap.add_argument("--tol-deg", type=float, default=5.0, help="経由地を結ぶ直線と実経路の許容ずれ [deg]（既定 5）")
+    ap.add_argument("--align-speed", type=float, default=40.0,
+                    help="起動時の整列の最大関節速度 [deg/s]（YAML の align.max_speed_dps・既定 40＝公式の 2.2s/約 90° 相当）")
     ap.add_argument("--set", help="書き出し先のセット名（config/pose_sets/<set>/・新しい名前だけ）")
     ap.add_argument("--scene", help="このセットで録るシーン（scenes/<scene>.yaml の name・後から sync でも可）")
     ap.add_argument("--write", action="store_true", help="left/right.yaml を書き出す（無ければ確認表示のみ）")
@@ -183,6 +185,9 @@ def main() -> int:
                 f"# waypoints = その直前の経路（t={ts[p0]:.1f}〜{ts[p1]:.1f}s）を RDP で間引いた点（直線と実経路のずれ ≤ {args.tol_deg}°）。\n"
                 f"# 整列は現在姿勢から waypoints を順にたどり、最後にこの開始姿勢へ入る（関節空間の直線補間・衝突判定なし）。\n"
                 f"# gripper は較正ゼロに固定（起動時の非ゼロ把持指令で follower gripper を壊した事故による約束）。\n")
+        # 整列は既定で 1 移動 2.2s 固定なので、経由地が多いと極端に遅い（2026-10-01 実測で 4 腕 約 1 分 45 秒）。
+        # 移動量で時間を決めさせる（lerobot fork 46a98170 の align.max_speed_dps）。
+        body += f"align:\n  max_speed_dps: {args.align_speed:.1f}\n"
         if wps:
             body += "waypoints:\n" + "".join("  - " + fmt_pose(w, "    ").lstrip() for w in wps)
         body += fmt_pose(pose) + "gripper: 0.0\n"
