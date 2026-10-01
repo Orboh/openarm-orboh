@@ -185,8 +185,10 @@ def cmd_check(a) -> int:
     if a.mode == "record" and s.status == "draft":
         do_sync(s, a.scene)
         return 0
-    bad: list[str] = []
-    warn_only = a.mode == "teleop" or os.environ.get("ALLOW_CALIB_MISMATCH") == "true"
+    bad: list[str] = []        # 止める不一致（姿勢・シーン・モデル未登録）
+    calib_bad: list[str] = []  # 較正の不一致（ALLOW_CALIB_MISMATCH=true なら警告に落とす。姿勢・シーンには効かない）
+    warn_only = a.mode == "teleop"
+    allow_calib = os.environ.get("ALLOW_CALIB_MISMATCH") == "true"
     for side, p in s.pose_files().items():
         want = s.get(f"pose_{side}_sha")
         if want and sha12(p) != want:
@@ -196,13 +198,13 @@ def cmd_check(a) -> int:
     if st == "reconstructed":
         notes.append(f"収集時の較正は記録から復元したもの（{s.get('calib_copy')}）")
     elif st and st != "ok":
-        bad.append(f"収集時の較正の状態: {st}（{s.get('calib_copy') or s.get('note')}）")
+        calib_bad.append(f"収集時の較正の状態: {st}（{s.get('calib_copy') or s.get('note')}）")
     for key, (rel, local) in UNITS.items():
         want = s.get(key)
         got = sha12(CALIB_ROOT / rel)
         # 原本の sha か、セットに入れた写し（復元版を含む）の sha のどちらかなら「収集時の較正」とみなす
         if want and got != want and got != sha12(s.dir / "calib" / local):
-            bad.append(f"較正 {key[6:]} が収集時と違う（今 {sha12(CALIB_ROOT / rel) or 'ファイル無し'} / 収集時 {want}）"
+            calib_bad.append(f"較正 {key[6:]} が収集時と違う（今 {sha12(CALIB_ROOT / rel) or 'ファイル無し'} / 収集時 {want}）"
                        f" → 収集時の較正に戻すなら: python3 scripts/pose_set.py restore-calib {s.name}")
     if a.mode == "record":
         if a.scene and a.scene != "none" and s.get("scene") and a.scene != s.get("scene"):
@@ -214,17 +216,20 @@ def cmd_check(a) -> int:
         bad.append("モデル未登録（学習後に set-model で登録する）")
     for n_ in notes:
         print(f"[pose-set] {s.name}: 注意: {n_}", file=sys.stderr)
-    if not bad:
+    if not bad and not calib_bad:
         print(f"[pose-set] {s.name}（{s.status}）: 開始姿勢・較正{'・シーン' if a.mode == 'record' else ''}とも一致")
         return 0
-    for b in bad:
+    for b in bad + calib_bad:
         print(f"[pose-set] {s.name}: {b}", file=sys.stderr)
     if warn_only:
         print(f"[pose-set] 警告のみで続行（mode={a.mode}）", file=sys.stderr)
         return 0
+    if not bad and allow_calib:
+        print("[pose-set] 較正の不一致を承知の上で続行（ALLOW_CALIB_MISMATCH=true・姿勢とシーンは一致）", file=sys.stderr)
+        return 0
     print(f"[pose-set] 止める。{s.name} は凍結済み＝この組でしか録らない・回さない。"
           f"条件を変えたなら新しいセット: python3 scripts/pose_set.py new <名前> --from {s.name}"
-          "（較正だけ承知の上で進めるなら ALLOW_CALIB_MISMATCH=true）", file=sys.stderr)
+          + ("（較正だけ承知の上で進めるなら ALLOW_CALIB_MISMATCH=true）" if calib_bad and not bad else "（ALLOW_CALIB_MISMATCH は較正だけに効く。姿勢・シーンの不一致には効かない）"), file=sys.stderr)
     return 1
 
 
