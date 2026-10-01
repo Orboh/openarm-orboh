@@ -6,7 +6,9 @@
 #
 # 流れ（操作者がするのは 3 と 6 だけ）:
 #   1. CAN 4 系統の UP とセット名の重複を確かめる（DOWN なら sudo bash scripts/canup.sh を案内して終わる）
-#   2. テレオペ（scripts/run_teleop_bimanual.sh・CURRENT のセットへ整列）を起動する
+#   2. テレオペ（scripts/run_teleop_bimanual.sh）を起動する。整列先は CURRENT ではなく、撮影専用の固定の
+#      出発姿勢 capture-base（腕を下ろした構え）に固定する。CURRENT に依存させると、撮り直すたびに前回撮った
+#      姿勢へ一度上がることになり、同じ手順でも出発の動きが変わる（再現性が無い）。CAPTURE_BASE で差し替え可
 #   3. 整列中は腕に触らない。4 ユニットの "connected." が揃った時点（整列完了）で記録を自動で始める
 #      ＝整列中の静止を開始姿勢として拾わない（以前は --since を手で渡していた）
 #   4. 操作者: 腕を下ろして 3〜5 秒止める → 通したい経路で開始姿勢まで動かす → 15 秒止める → 少し下ろして Ctrl-C
@@ -21,7 +23,9 @@ SET="${1:-}"; SCENE="${2:-}"
 shift; [ $# -gt 0 ] && shift
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 PY="$HOME/projects/lerobot/.venv/bin/python"
+CAPTURE_BASE="${CAPTURE_BASE:-capture-base}"
 cd "$REPO"
+[ -f "config/pose_sets/$CAPTURE_BASE/set.yaml" ] || { echo "[capture] 出発姿勢のセット $CAPTURE_BASE が無い" >&2; exit 1; }
 
 if [ -e "config/pose_sets/$SET" ]; then
   echo "[capture] セット $SET は既にある（別の名前で撮る）" >&2; exit 1
@@ -40,7 +44,7 @@ LOG="$HOME/collections/pose-$SET-$TS.teleop.log"
 : > "$LOG"
 
 cat <<MSG
-[capture] セット $SET を撮る（今の整列先 = $(cat config/pose_sets/CURRENT 2>/dev/null)）
+[capture] セット $SET を撮る（整列先 = 撮影の出発姿勢 $CAPTURE_BASE。CURRENT は書き出し時まで触らない）
 [capture] 1) 整列中は腕に触らない。整列が終わると「記録開始」と出る
 [capture] 2) 腕を下ろして 3〜5 秒止める
 [capture] 3) 通したい経路で開始姿勢までゆっくり動かす（肘は畳み切らない・持ち手をねじらない）
@@ -57,7 +61,7 @@ MSG
 REC=$!
 
 trap 'true' INT   # Ctrl-C はテレオペにだけ効かせ、このスクリプトは後処理へ進む
-bash scripts/run_teleop_bimanual.sh "$@" 2>&1 | tee -i "$LOG"
+POSE_SET="$CAPTURE_BASE" bash scripts/run_teleop_bimanual.sh "$@" 2>&1 | tee -i "$LOG"
 trap - INT
 kill -INT "$REC" 2>/dev/null; sleep 1; kill "$REC" 2>/dev/null; wait "$REC" 2>/dev/null
 

@@ -1,0 +1,16 @@
+# 開始姿勢セット。scripts/pose_set.py が読み書きする（1 行 1 キー・入れ子なし）。書式と運用は config/pose_sets/README.md
+name: capture-base
+status: frozen
+frozen_at: 2026-10-01 (撮影の出発姿勢・モデルとは組まない)
+purpose: capture-base
+created_at: 2026-10-01 22:01
+derived_from: pose-takeei-20261001.csv の t=664.9〜668.1 s（Kento が腕を下ろして止めた区間）
+arms: both
+mirror: false
+pose_left_sha: ef5d692470be
+pose_right_sha: 617ca0c4ccac
+calib_status: ok
+code_openarm_orboh: e92c93da
+code_lerobot: 266d5939
+synced_at: 2026-10-01 22:01
+note: 撮影専用の固定の出発姿勢。capture_start_pose_bimanual.sh だけが使う。データ収集・推論には使わない。較正をやり直しても teleop の照合は警告だけなので作り直さなくてよい（値は数度ずれる）
