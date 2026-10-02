@@ -117,7 +117,8 @@ GRAVITY_URDF="${GRAVITY_URDF:-$REPO/urdf/openarm_v10_bimanual.urdf}"
 # 重力の分（肩で約 6°）下がって終わり、ループ開始で跳ね上がる。ALIGN_GRAVITY=false で従来どおり。
 ALIGN_GRAVITY="${ALIGN_GRAVITY:-true}"
 ALIGN_GRAVITY_ARGS=()
-# 終了時の戻り（run_teleop_bimanual.sh と同じ・RETURN_ON_EXIT=false で無効）
+# esc（収集を終える）か全本数の完了で終えたときだけ、開始姿勢から経由地を逆にたどって下ろした構えへ戻して
+# から脱力する。Ctrl-C は即時脱力（非常停止）のまま。RETURN_ON_EXIT=false で戻さない（run_teleop_bimanual.sh と同じ）
 RETURN_ON_EXIT="${RETURN_ON_EXIT:-true}"
 ALIGN_GRAVITY_ARGS+=(--robot.left_arm_config.return_on_disconnect="$RETURN_ON_EXIT"
                      --robot.right_arm_config.return_on_disconnect="$RETURN_ON_EXIT"

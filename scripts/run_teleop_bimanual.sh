@@ -11,9 +11,9 @@ RSCALE="${2:-$LSCALE}"
 #   --robot.left_arm_config.position_kp=[240,240,240,240,24,31,25,10] --robot.right_arm_config.position_kp=[...]
 #   2026-09-21: 木材把持で follower gripper がコイル過温ラッチ（kp 25 で握り込み→ストール電流）。kp を下げて飽和トルクを抑える）
 EXTRA_ARGS=("${@:3}")
-# 終了（Ctrl-C）時に、トルクを切る前に開始姿勢へ戻り、経由地を逆にたどって下ろした構えまで戻す
-# （経由地つきのセットだけ・2026-10-02）。戻りの途中でもう一度 Ctrl-C を押すとその場で脱力する。
-# 無効にするなら RETURN_ON_EXIT=false。
+# 終了は esc: トルクを切る前に開始姿勢へ戻り、経由地を逆にたどって下ろした構えまで戻す（経由地つきの
+# セットだけ・2026-10-02）。Ctrl-C は即時脱力（非常停止）のまま。戻りの途中で Ctrl-C を押してもその場で
+# 脱力する。esc でも戻さないなら RETURN_ON_EXIT=false。
 RETURN_ON_EXIT="${RETURN_ON_EXIT:-true}"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 URDF="$REPO/urdf/openarm_v10_bimanual.urdf"
