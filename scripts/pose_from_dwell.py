@@ -185,12 +185,20 @@ def main() -> int:
                     help="この t_rel [s] より後だけを見る（同じ記録に起動時の整列が入っているとき、整列中の静止を拾わないため）")
     ap.add_argument("--align-speed", type=float, default=40.0,
                     help="起動時の整列の最大関節速度 [deg/s]（YAML の align.max_speed_dps・既定 40＝公式の 2.2s/約 90° 相当）")
+    ap.add_argument("--quiet", action="store_true", help="抽出の表示を出さない（書き出し専用。capture_start_pose_bimanual.sh が使う）")
     ap.add_argument("--set", help="書き出し先のセット名（config/pose_sets/<set>/・新しい名前だけ）")
     ap.add_argument("--scene", help="このセットで録るシーン（scenes/<scene>.yaml の name・後から sync でも可）")
     ap.add_argument("--write", action="store_true", help="left/right.yaml を書き出す（無ければ確認表示のみ）")
     args = ap.parse_args()
 
     sides = [s.strip() for s in args.sides.split(",") if s.strip()]
+    if args.quiet:  # 書き出し専用: 抽出の表示（確認で一度見たもの）を出さず、書き出しの行だけ出す
+        import builtins
+        _print = builtins.print
+        def print(*a, **k):  # noqa: A001
+            if k.get("file") is sys.stderr or str(a[0] if a else "").startswith(("[dwell] 書き出し", "[dwell] 使うなら", "[dwell] 既に")):
+                _print(*a, **k)
+        globals()["print"] = print
     ts, q = load(args.csv.expanduser(), args.unit, sides)
     if args.since is not None:
         keep = [i for i, t in enumerate(ts) if t >= args.since]

@@ -117,6 +117,12 @@ GRAVITY_URDF="${GRAVITY_URDF:-$REPO/urdf/openarm_v10_bimanual.urdf}"
 # 重力の分（肩で約 6°）下がって終わり、ループ開始で跳ね上がる。ALIGN_GRAVITY=false で従来どおり。
 ALIGN_GRAVITY="${ALIGN_GRAVITY:-true}"
 ALIGN_GRAVITY_ARGS=()
+# 終了時の戻り（run_teleop_bimanual.sh と同じ・RETURN_ON_EXIT=false で無効）
+RETURN_ON_EXIT="${RETURN_ON_EXIT:-true}"
+ALIGN_GRAVITY_ARGS+=(--robot.left_arm_config.return_on_disconnect="$RETURN_ON_EXIT"
+                     --robot.right_arm_config.return_on_disconnect="$RETURN_ON_EXIT"
+                     --teleop.left_arm_config.return_on_disconnect="$RETURN_ON_EXIT"
+                     --teleop.right_arm_config.return_on_disconnect="$RETURN_ON_EXIT")
 if [ "$ALIGN_GRAVITY" = "true" ]; then
   ALIGN_GRAVITY_ARGS+=(--robot.left_arm_config.align_gravity_urdf_path="$GRAVITY_URDF"
                        --robot.right_arm_config.align_gravity_urdf_path="$GRAVITY_URDF")

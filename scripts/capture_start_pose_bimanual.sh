@@ -12,6 +12,7 @@
 #   3. 整列中は腕に触らない。4 ユニットの "connected." が揃った時点（整列完了）で記録を自動で始める
 #      ＝整列中の静止を開始姿勢として拾わない（以前は --since を手で渡していた）
 #   4. 操作者: 腕を下ろして 3〜5 秒止める → 通したい経路で開始姿勢まで動かす → 15 秒止める → 少し下ろして Ctrl-C
+#      （このテレオペは出発姿勢 capture-base で動くので、Ctrl-C 時の「戻り」は起きない＝経由地が無い）
 #   5. 記録を止め、開始姿勢・経路・経由地・警告（可動域の端・手首のねじれ）を表示する
 #   6. 操作者: 書き出すか（y/N）、CURRENT にするか（y/N）を答える
 #   7. 記録 CSV とテレオペのログをセットの evidence/ に残す（不採用なら ~/collections に -failed で残す）
@@ -77,7 +78,7 @@ if [ "${ans:-N}" != "y" ]; then
   mv "$CSV" "${CSV%.csv}-failed.csv"; mv "$LOG" "${LOG%.teleop.log}-failed.teleop.log"
   echo "[capture] 書き出さなかった。記録は ${CSV%.csv}-failed.csv に残した（撮り直すなら同じコマンドをもう一度）"; exit 0
 fi
-"$PY" scripts/pose_from_dwell.py "$CSV" --set "$SET" ${SCENE:+--scene "$SCENE"} --write || exit 1
+"$PY" scripts/pose_from_dwell.py "$CSV" --set "$SET" ${SCENE:+--scene "$SCENE"} --write --quiet || exit 1
 mkdir -p "config/pose_sets/$SET/evidence"
 cp "$CSV" "config/pose_sets/$SET/evidence/02-raw-$SET.csv"
 cp "$LOG" "config/pose_sets/$SET/evidence/02-teleop.log"

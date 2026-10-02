@@ -11,6 +11,10 @@ RSCALE="${2:-$LSCALE}"
 #   --robot.left_arm_config.position_kp=[240,240,240,240,24,31,25,10] --robot.right_arm_config.position_kp=[...]
 #   2026-09-21: 木材把持で follower gripper がコイル過温ラッチ（kp 25 で握り込み→ストール電流）。kp を下げて飽和トルクを抑える）
 EXTRA_ARGS=("${@:3}")
+# 終了（Ctrl-C）時に、トルクを切る前に開始姿勢へ戻り、経由地を逆にたどって下ろした構えまで戻す
+# （経由地つきのセットだけ・2026-10-02）。戻りの途中でもう一度 Ctrl-C を押すとその場で脱力する。
+# 無効にするなら RETURN_ON_EXIT=false。
+RETURN_ON_EXIT="${RETURN_ON_EXIT:-true}"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 URDF="$REPO/urdf/openarm_v10_bimanual.urdf"
 BIN="$HOME/projects/lerobot/.venv/bin/lerobot-teleoperate"
@@ -27,6 +31,8 @@ POSE_ARGS=()
   --robot.left_arm_config.port=can_fol_l --robot.left_arm_config.side=left \
   --robot.right_arm_config.port=can_fol_r --robot.right_arm_config.side=right \
   --robot.left_arm_config.align_gravity_urdf_path="$URDF" --robot.right_arm_config.align_gravity_urdf_path="$URDF" \
+  --robot.left_arm_config.return_on_disconnect="$RETURN_ON_EXIT" --robot.right_arm_config.return_on_disconnect="$RETURN_ON_EXIT" \
+  --teleop.left_arm_config.return_on_disconnect="$RETURN_ON_EXIT" --teleop.right_arm_config.return_on_disconnect="$RETURN_ON_EXIT" \
   --robot.id=follower \
   --teleop.type=bi_openarm_leader \
   --teleop.left_arm_config.port=can_lead_l \
