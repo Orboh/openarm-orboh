@@ -83,6 +83,28 @@ def still_segments(ts, q, sides, still_dps, min_dwell):
     return segs
 
 
+def merge_and_bound(segs, ts, q, sides, gap_s, tol):
+    """静止区間を整える（2026-10-02 実測: 開始姿勢で約 20 s 止めた区間が 0.2 s の手の揺れで 11.6 s と 8.8 s に割れ、
+    記録の頭の 13.4 s の静止（整列直後の出発姿勢のまま）が最長として選ばれた）。
+    1. gap_s 以下の途切れで隣り合い、姿勢の差が全関節 tol 以内の区間は 1 つにつなぐ。
+    2. 記録の頭・終わりに接する区間は開始姿勢の候補から外す（前後が動きで挟まれた区間だけが「意図して止めた」静止）。
+    返り値: (経路の頭を探すのに使う全区間, 開始姿勢の候補)"""
+    def pose(seg, side):
+        return [statistics.median(c) for c in zip(*q[side][seg[0]:seg[1] + 1])]
+    merged = []
+    for seg in segs:
+        if merged:
+            prev = merged[-1]
+            close = all(abs(a - b) <= tol for sd in sides for a, b in zip(pose(prev, sd), pose(seg, sd)))
+            if ts[seg[0]] - ts[prev[1]] <= gap_s and close:
+                merged[-1] = (prev[0], seg[1])
+                continue
+        merged.append(seg)
+    last = len(ts) - 1
+    cands = [sg for sg in merged if sg[0] > 0 and sg[1] < last]
+    return merged, cands
+
+
 def rdp(points: list[list[float]], tol: float) -> list[int]:
     """関節空間の折れ線を間引く。距離は「直線補間との各関節の差の最大値」（度）。残す点の添字を返す。"""
     if len(points) < 3:
@@ -158,6 +180,7 @@ def main() -> int:
     ap.add_argument("--tol-deg", type=float, default=5.0, help="経由地を結ぶ直線と実経路の許容ずれ [deg]（既定 5）")
     ap.add_argument("--limit-margin", type=float, default=5.0, help="可動域の端からの余裕の目安 [deg]（下回ると警告・既定 5）")
     ap.add_argument("--wrist-max", type=float, default=60.0, help="経路中の手首ロール J7 の目安 [deg]（超えると警告・既定 60）")
+    ap.add_argument("--merge-gap", type=float, default=0.6, help="この秒数以下の途切れで分かれた静止区間をつなぐ（既定 0.6）")
     ap.add_argument("--since", type=float, default=None,
                     help="この t_rel [s] より後だけを見る（同じ記録に起動時の整列が入っているとき、整列中の静止を拾わないため）")
     ap.add_argument("--align-speed", type=float, default=40.0,
@@ -180,9 +203,14 @@ def main() -> int:
     if not segs:
         print(f"[dwell] {args.min_dwell}s 以上の静止が無い（--still-dps {args.still_dps}）", file=sys.stderr)
         return 1
-    ranked = sorted(segs, key=lambda s: ts[s[1]] - ts[s[0]], reverse=True)
+    segs, cands = merge_and_bound(segs, ts, q, sides, args.merge_gap, args.tol_deg)
+    if not cands:
+        print("[dwell] 前後を動きで挟まれた静止が無い（記録の頭か終わりに接した静止しか無い）。撮り直す", file=sys.stderr)
+        return 1
+    ranked = sorted(cands, key=lambda s: ts[s[1]] - ts[s[0]], reverse=True)
     best = ranked[0]
-    print(f"[dwell] 記録 {ts[-1] - ts[0]:.1f}s・静止区間 {len(segs)} 個（長い順）:")
+    print(f"[dwell] 記録 {ts[-1] - ts[0]:.1f}s・静止区間 {len(segs)} 個（途切れ {args.merge_gap}s 以下はつないだ）。"
+          f"開始姿勢の候補 {len(cands)} 個（記録の頭・終わりに接する静止は除外）:")
     for s in ranked[:5]:
         mark = "  ← 開始姿勢" if s == best else ""
         print(f"    t={ts[s[0]]:7.1f}〜{ts[s[1]]:7.1f}s  {ts[s[1]] - ts[s[0]]:5.1f}s{mark}")
