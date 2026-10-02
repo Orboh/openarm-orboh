@@ -1,0 +1,86 @@
+# OpenArm 開始姿勢 -- side=right, degrees (logical・follower)。
+# 2026-10-02 11:36 scripts/pose_from_dwell.py で生成: pose-takeei-v2-20261002-113439.csv の一番長い静止区間 t=8.2〜33.3s（25.0s）の中央値。
+# waypoints = その直前の経路（t=0.2〜8.2s）を RDP で間引いた点（直線と実経路のずれ ≤ 5.0°）。
+# 整列は現在姿勢から waypoints を順にたどり、最後にこの開始姿勢へ入る（関節空間の直線補間・衝突判定なし）。
+# gripper は較正ゼロに固定（起動時の非ゼロ把持指令で follower gripper を壊した事故による約束）。
+align:
+  max_speed_dps: 40.0
+waypoints:
+  - joint_1: -7.52
+    joint_2: -0.84
+    joint_3: 0.34
+    joint_4: 23.52
+    joint_5: -2.91
+    joint_6: -0.77
+    joint_7: -9.12
+  - joint_1: -7.52
+    joint_2: -0.82
+    joint_3: 0.34
+    joint_4: 23.50
+    joint_5: -2.91
+    joint_6: -0.77
+    joint_7: -9.12
+  - joint_1: -7.61
+    joint_2: -0.82
+    joint_3: 0.34
+    joint_4: 23.50
+    joint_5: -2.91
+    joint_6: -0.77
+    joint_7: 1.30
+  - joint_1: -14.91
+    joint_2: -0.84
+    joint_3: 0.34
+    joint_4: 24.13
+    joint_5: -5.95
+    joint_6: -1.45
+    joint_7: 1.28
+  - joint_1: -21.07
+    joint_2: -0.82
+    joint_3: 0.34
+    joint_4: 29.64
+    joint_5: -7.83
+    joint_6: -1.47
+    joint_7: 4.21
+  - joint_1: -56.70
+    joint_2: -0.67
+    joint_3: 0.34
+    joint_4: 90.99
+    joint_5: -13.08
+    joint_6: -6.50
+    joint_7: 2.90
+  - joint_1: -78.49
+    joint_2: -0.69
+    joint_3: 0.34
+    joint_4: 112.39
+    joint_5: -13.49
+    joint_6: -6.06
+    joint_7: 6.35
+  - joint_1: -77.60
+    joint_2: -0.69
+    joint_3: 0.34
+    joint_4: 132.23
+    joint_5: -13.49
+    joint_6: -5.86
+    joint_7: 13.54
+  - joint_1: -66.32
+    joint_2: -0.67
+    joint_3: 0.34
+    joint_4: 132.23
+    joint_5: -13.51
+    joint_6: -5.53
+    joint_7: 11.75
+  - joint_1: -57.58
+    joint_2: -0.69
+    joint_3: 0.34
+    joint_4: 132.21
+    joint_5: -13.73
+    joint_6: 5.66
+    joint_7: 11.42
+joint_1: -53.07
+joint_2: -0.68
+joint_3: 0.34
+joint_4: 132.21
+joint_5: -23.63
+joint_6: 12.61
+joint_7: 8.45
+gripper: 0.0
