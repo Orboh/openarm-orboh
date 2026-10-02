@@ -81,7 +81,8 @@ fi
 "$PY" scripts/pose_from_dwell.py "$CSV" --set "$SET" ${SCENE:+--scene "$SCENE"} --write --quiet || exit 1
 mkdir -p "config/pose_sets/$SET/evidence"
 cp "$CSV" "config/pose_sets/$SET/evidence/02-raw-$SET.csv"
-cp "$LOG" "config/pose_sets/$SET/evidence/02-teleop.log"
+# ログには設定ダンプの絶対パス（ホームのユーザー名）が入る。repo に入れるので ~ に置き換える（pre-push secret-scan 対策）
+sed -E "s#$HOME#~#g; s#/home/[A-Za-z0-9._-]+#~#g" "$LOG" > "config/pose_sets/$SET/evidence/02-teleop.log"
 read -r -p "[capture] CURRENT を $SET にする（次のテレオペ・収集の整列先になる）？ [y/N] " ans
 [ "${ans:-N}" = "y" ] && python3 scripts/pose_set.py current "$SET"
 python3 scripts/pose_set.py list
