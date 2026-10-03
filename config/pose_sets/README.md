@@ -31,8 +31,9 @@
 | やること | コマンド |
 |---|---|
 | 一覧（`*` が CURRENT） | `python3 scripts/pose_set.py list` |
+| **両腕の開始姿勢と立ち上がり経路をテレオペ 1 回で撮る（推奨）** | `bash scripts/capture_start_pose_bimanual.sh <新名> [シーン]`（出発姿勢 capture-base へ整列、整列完了から自動で記録、Ctrl-C か esc で終えると抽出と警告、y/N で書き出しと CURRENT の切り替え・2026-10-02） |
 | 中身と sha | `python3 scripts/pose_set.py show <set>` |
-| テレオペで一番長く止めた姿勢から作る | `python3 scripts/pose_from_dwell.py <csv> --set <新名> --scene <scene> --write` |
+| 記録済みの CSV から作り直す（撮影スクリプトの中身と同じ） | `python3 scripts/pose_from_dwell.py <csv> --set <新名> --scene <scene> --write` |
 | 既存セットの姿勢を引き継いで作る（較正・シーンを変えた後） | `python3 scripts/pose_set.py new <新名> --from <set>` |
 | 片腕ずつ手で撮る | `POSE_SET=<新名> bash scripts/capture_initial_pose.sh <side>` |
 | 使うセットを切り替える | `python3 scripts/pose_set.py current <set>` |
@@ -45,11 +46,14 @@
 
 ---
 
-## セット一覧（2026-09-30）
+## セット一覧（2026-10-03）
 
-| セット | モデル | シーン | 較正 |
-|---|---|---|---|
-| bottle-v2 | gr00t-bottle-v2 | bottle-desk-v1 | follower_right は 08-04 dev-log の表から復元（原本なし・今との差 最大 1.79°）。leader_right は原本 |
-| tape-v1 | gr00t-tape-pnp-v1 | tape-desk-v1 | 同上 |
-| bi-blockstack-v1 | gr00t-bi-blockstack-v1 | itabashi-blockstack-v1 | 原本 4 本（2026-09-21〜22 bump-to-stop） |
-| bi-blockstack-leftarm-v1 | gr00t-bi-blockstack-leftarm-v1 | itabashi-blockstack-leftarm-rightcam-v1 | 同上。右腕はカメラ役で経由地つき |
+| セット | 状態 | モデル | シーン | 較正 |
+|---|---|---|---|---|
+| bottle-v2 | frozen | gr00t-bottle-v2 | bottle-desk-v1 | follower_right は 08-04 dev-log の表から復元（原本なし・今との差 最大 1.79°）。leader_right は原本 |
+| tape-v1 | frozen | gr00t-tape-pnp-v1 | tape-desk-v1 | 同上 |
+| bi-blockstack-v1 | frozen | gr00t-bi-blockstack-v1 | itabashi-blockstack-v1 | 原本 4 本（2026-09-21〜22 bump-to-stop） |
+| bi-blockstack-leftarm-v1 | frozen | gr00t-bi-blockstack-leftarm-v1 | itabashi-blockstack-leftarm-rightcam-v1 | 同上。右腕はカメラ役で経由地つき |
+| capture-base | frozen | なし（撮影の出発姿勢専用・収集と推論には使わない） | なし | 照合しない（テレオペは警告のみ） |
+| takeei-v1 | draft（Thor の作業ツリーのみ・未 commit） | 未学習 | 未設定 | 2026-10-01 撮影・肘 J4 が可動域の端の 1° 手前で不採用 |
+| takeei-v2 | draft・CURRENT | 未学習 | 未設定（itabashi-takeei-v1 を準備中） | 2026-10-02 撮影・作業面 108・経由地 左右 10 点。最初の本番収集で凍結される |
