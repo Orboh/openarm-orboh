@@ -16,7 +16,7 @@
 #   5. 記録を止め、開始姿勢・経路・経由地・警告（可動域の端・手首のねじれ）を表示する
 #   6. 操作者: 書き出すか（y/N）、CURRENT にするか（y/N）を答える
 #   7. 記録 CSV とテレオペのログをセットの evidence/ に残す（不採用なら ~/collections に -failed で残す）
-# 設計の正本: Vault 07Member's-free-space/Kento/01-design/openarm-start-pose-determination-process.md
+# 設計の正本: Vault 07Member's-free-space/Kento/01-design/OpenArm/openarm-start-pose-determination-process.md
 set -uo pipefail
 
 SET="${1:-}"; SCENE="${2:-}"
