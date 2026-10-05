@@ -9,6 +9,8 @@
 # テレオペの終了後（Ctrl-C・esc とも、脱力の瞬間まで残して）止めて要約を出す。別端末でロガーを立て直す手間は不要。
 # 記録は ~/collections/dmlog-teleop-<MMDD-HHMMSS>.csv（DMLOG_DIR で置き場所を変える）。DMLOG=off で従来どおり
 #   （例: DMLOG=off bash scripts/run_teleop_bimanual.sh）。重いときは DMLOG_IFACES="can_fol_l can_fol_r"。
+#   解析は既定で異常があったときだけ裏で書く（2026-10-05・DMLOG_REPORT=anomaly|on|off）。テレオペしながら見るときは
+#   別端末で bash scripts/dmlog_live.sh、あとからレポートを作るときは bash scripts/dmlog_report.sh（どちらも latest が既定）。
 LSCALE="${1:-1.0}"
 RSCALE="${2:-$LSCALE}"
 # 3 番目以降の引数は lerobot-teleoperate へそのまま渡す（例: グリッパの kp を下げる

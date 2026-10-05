@@ -32,7 +32,10 @@
 #   受信専用ロガー（scripts/damiao_feedback_log.py・送信ゼロ）を裏で起こし、終了後に止めて要約を出す。
 #   手で別端末にロガーを立てる必要は無い。ロガーは console.log を追って、エピソードの開始・終了・破棄・
 #   収集の停止を episode 番号つきの MARK 行として同じ CSV に書く（データセットの episode と 1 対 1）。
-#   run_dir に dmlog-<tag>.csv / .log / .marks / .summary.txt / .report.txt が増える。要約は console.log にも入る。
+#   run_dir に dmlog-<tag>.csv / .log / .marks / .summary.txt が増える。要約は console.log にも入る。
+#   解析（.report.txt）は既定で異常（動作中の LOST・エラー状態・過温・異常な終了コード）があったときだけ裏で書く
+#   （2026-10-05・DMLOG_REPORT=anomaly）。あとから作るときは bash scripts/dmlog_report.sh <run_dir> [--episode N]、
+#   収集しながら見るときは別端末で bash scripts/dmlog_live.sh。
 #   Ctrl-C でもロガーは先に死なない（脱力の瞬間まで残してから止める）。DMLOG_IFACES / DMLOG_REPORT 等は lib の冒頭。
 #
 # 1収集セッション = 1 run_dir: ~/collections/<UTC>-<scene-tag>/ に
