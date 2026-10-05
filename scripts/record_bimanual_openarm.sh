@@ -26,6 +26,14 @@
 #     NUM_EPISODES=30 ... bash scripts/record_bimanual_openarm.sh <tag>   # 既存データセットへ追記(REPO_ID は stamp 後の実名・NUM_EPISODES は今回分)
 #   DISPLAY_DATA=true DISPLAY_IP=<手元PCのIP> DISPLAY_PORT=9876 ... bash scripts/record_bimanual_openarm.sh <tag>   # 手元 PC の rerun へ映像をストリーミング
 #   CONSOLE_FILTER=off bash scripts/record_bimanual_openarm.sh <tag>   # 画面の間引き（scripts/record_console_filter.py・2026-09-22）を切って全行を表示。console.log は常に全行
+#   DMLOG=off bash scripts/record_bimanual_openarm.sh <tag>   # Damiao CAN フィードバックの自動記録（下記）を切る（従来どおりの起動になる）
+#
+# Damiao CAN フィードバックの自動記録（2026-10-05・scripts/lib/dmlog.sh）: lerobot-record の起動直前に
+#   受信専用ロガー（scripts/damiao_feedback_log.py・送信ゼロ）を裏で起こし、終了後に止めて要約を出す。
+#   手で別端末にロガーを立てる必要は無い。ロガーは console.log を追って、エピソードの開始・終了・破棄・
+#   収集の停止を episode 番号つきの MARK 行として同じ CSV に書く（データセットの episode と 1 対 1）。
+#   run_dir に dmlog-<tag>.csv / .log / .marks / .summary.txt / .report.txt が増える。要約は console.log にも入る。
+#   Ctrl-C でもロガーは先に死なない（脱力の瞬間まで残してから止める）。DMLOG_IFACES / DMLOG_REPORT 等は lib の冒頭。
 #
 # 1収集セッション = 1 run_dir: ~/collections/<UTC>-<scene-tag>/ に
 #   console.log / start-pose-bimanual.jsonl / manifest.json / command.sh が残る。
@@ -195,6 +203,13 @@ fi
 # 既定は開始姿勢セット（POSE_SET・未指定なら config/pose_sets/CURRENT）。収集は「今の較正で録る」
 # ので、セットが較正を記録していれば一致を必須にする（違う較正の上に同じセットを積まない）。
 source "$REPO/scripts/lib/pose_set.sh"
+# lib が届いていなくても収集は止めない（set -e 下で source の失敗が即死になるため・2026-10-05 監査）
+if [ -f "$REPO/scripts/lib/dmlog.sh" ]; then
+  source "$REPO/scripts/lib/dmlog.sh"
+else
+  echo "[record-bi] 警告: scripts/lib/dmlog.sh が無いので Damiao フィードバックの自動記録なしで続ける" >&2
+  _dmlog_enabled() { return 1; }; dmlog_start() { :; }; dmlog_mark() { :; }; dmlog_stop() { :; }
+fi
 pose_set_load current || exit 1
 LPOSE="${LEFT_POSE_PATH:-$LPOSE}"
 RPOSE="${RIGHT_POSE_PATH:-$RPOSE}"
@@ -477,6 +492,7 @@ fi
   echo "[record-bi] obs=$OBS  repo_id=$REPO_ID  resume=$RESUME  root=${DATASET_ROOT:-<default>}  play_sounds=$PLAY_SOUNDS  episodes(this session)=$NUM_EPISODES  ${CAMERA_W}x${CAMERA_H}@${FPS}fps"
   echo "[record-bi] gravity_comp=$GRAVITY_COMP L=$LSCALE R=$RSCALE urdf=$GRAVITY_URDF"
   echo "[record-bi] episode_advance=$EPISODE_ADVANCE"
+  echo "[record-bi] dmlog=$(_dmlog_enabled && echo "on ifaces=${DMLOG_IFACES:-$FOLLOWER_L $FOLLOWER_R $LEADER_L $LEADER_R}" || echo off)"
   if [ "$EPISODE_ADVANCE" = "manual" ]; then
     echo "[record-bi]   起動時: follower L→R, leader L→R の順に各 2.2 秒ずつ自動整列する(約 9 秒)。connect 前に両腕と机から手を引くこと"
     echo "[record-bi]   エピソード終了後: a = 両腕を開始姿勢へ戻す -> 環境を整える -> 右矢印 = 次を開始"
@@ -580,6 +596,12 @@ chmod +x "$COMMAND_SH"
 } 2>&1 | tee -a "$CONSOLE_LOG"
 rm -f "$MANIFEST_INIT_OUT"
 
+# Damiao CAN フィードバックを裏で記録する（2026-10-05）。ここ（run_dir 確定後・lerobot 起動直前）で起こすのは、
+# 手前の検証 exit でロガーが孤児にならないようにするため。受信専用で腕の動きには関わらない。起動に失敗しても
+# 警告だけで収集は続ける。DMLOG=off なら何もしない。
+DMLOG_CONSOLE="$CONSOLE_LOG"
+dmlog_start "$RUN_DIR/dmlog-$TAG" "$PYTHON_BIN" "$CONSOLE_LOG" "$FOLLOWER_L" "$FOLLOWER_R" "$LEADER_L" "$LEADER_R"
+
 # set -e を一時的に外す: pipefail 下で lerobot が非0終了すると、ここで即座に
 # 抜けて終了メッセージも終了コードの伝播も走らなくなる。PIPESTATUS[0] で
 # lerobot 自身の終了コードを取り(tee の 0 で隠さない)、最後に伝播させる。
@@ -611,6 +633,8 @@ set +e
   ${POSE_ARGS[@]+"${POSE_ARGS[@]}"} \
   "${GATE_ARGS[@]}" 2>&1 | tee -a "$CONSOLE_LOG" | "$PYTHON_BIN" -u "$REPO/scripts/record_console_filter.py"
 RC=${PIPESTATUS[0]}
+# lerobot の終了（esc の戻り・脱力を含む）を見届けてから止める。RC の取得より前に何も挟まない。
+dmlog_stop "rc=$RC"
 set -e
 
 # stamp 後の実 repo_id は実行後にしか分からない。ファイルシステムから引いて

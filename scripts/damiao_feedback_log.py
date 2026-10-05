@@ -26,6 +26,18 @@ dm_motor_control.cpp L88-93 と一致）:
     復号往復とレポート関数を合成データで検証する（実 CAN 不要）。
 
 保存先の例（Thor）: ~/collections/dmlog-<UTC>.csv。--report は Thor でも Vector でも動く（stdlib + python-can のみ）。
+
+裏で自動起動する口（2026-10-05・scripts/lib/dmlog.sh が使う。手で起こす従来の使い方はそのまま動く）:
+  ... damiao_feedback_log.py can_fol_l ... --out X.csv --follow RUN_DIR/console.log --marks X.marks
+      --summary-out X.summary.txt --pid-file X.pid --watch-pid <親の PID>  </dev/null
+    --follow FILE   FILE の追記分を読み、lerobot-record のエピソード境界行（Recording episode N /
+                    矢印キー / esc / Re-record / Stop recording 等）を MARK 行（EP_START ep=N ...）にする。
+                    "MARK <文字列>" で始まる行はその文字列をそのまま MARK にする（シェルからの印）。
+                    標準入力の Enter MARK と違って端末の stdin を読まないので、lerobot のキー入力を奪わない。
+    --marks FILE    --follow と同じだが先頭から読む（シェルが MARK を追記する専用ファイル・起動との競合で落とさない）。
+    --summary-out   停止時に短い要約（記録時間・受信レート・最大温度・LOST/BACK・エピソード表・MARK）を書く。
+    --watch-pid     その PID が消えたら自分も止まる（親スクリプトが SIGKILL 等で trap を走らせずに死んだときの孤児防止）。
+    SIGTERM / SIGHUP でも Ctrl-C と同じく CSV を flush して閉じる（裏で起動すると SIGINT は無視されるため）。
 """
 from __future__ import annotations
 
@@ -33,7 +45,10 @@ import argparse
 import bisect
 import csv
 import datetime as dt
+import os
 import queue
+import re
+import signal
 import statistics
 import sys
 import threading
@@ -111,13 +126,16 @@ def encode_for_selftest(state: int, motor_id: int, pos_rad: float, vel_rad_s: fl
 
 # ---------------------------------------------------------------- logger --
 
-def _reader(iface: str, out_q: "queue.Queue", stop: threading.Event, t0_mono: float) -> None:
+def _reader(iface: str, out_q: "queue.Queue", stop: threading.Event, t0_mono: float,
+            open_failed: list | None = None) -> None:
     import can
 
     try:
         bus = can.Bus(channel=iface, interface="socketcan", fd=True)
     except Exception as exc:  # noqa: BLE001 - インタフェース不在等は起動時に握って続行
         print(f"!! {iface}: open failed: {exc}", file=sys.stderr)
+        if open_failed is not None:
+            open_failed.append(iface)
         return
     try:
         while not stop.is_set():
@@ -155,16 +173,191 @@ def _stdin_marker(out_q: "queue.Queue", stop: threading.Event, t0_mono: float) -
             return
         if not line:
             return
-        text = line.strip()
-        out_q.put({
-            "t_wall": f"{time.time():.6f}",
-            "t_rel": f"{time.monotonic() - t0_mono:.6f}",
-            "iface": "MARK", "motor": text or "(mark)", "mtype": "", "state_hex": "", "state_name": "",
-            "pos_rad": "", "vel_rad_s": "", "tau_nm": "", "t_mos": "", "t_rotor": "", "raw_hex": "",
-        })
+        out_q.put(_mark_row(line.strip(), t0_mono))
 
 
-def run_logger(ifaces: list[str], out_path: str, print_every: float) -> int:
+def _mark_row(text: str, t0_mono: float) -> dict:
+    return {
+        "t_wall": f"{time.time():.6f}",
+        "t_rel": f"{time.monotonic() - t0_mono:.6f}",
+        "iface": "MARK", "motor": text or "(mark)", "mtype": "", "state_hex": "", "state_name": "",
+        "pos_rad": "", "vel_rad_s": "", "tau_nm": "", "t_mos": "", "t_rotor": "", "raw_hex": "",
+    }
+
+
+class EpisodeMarker:
+    """lerobot-record の console.log の行 → エピソード境界の MARK 文字列（2026-10-05）。
+
+    境界の行は lerobot_record.py L790/840/856/867/878/897 と control_utils.py のキー echo
+    （2026-09-23 の accept run の console.log で実物を確認）。保存完了の行は無い（save_episode は無言）ので、
+    「次の Recording episode N+1 が出た」「Re-record / No frames が出なかった」で保存を推定する。
+    矢印キーの echo は録画中なら「終了」、待機中なら「開始の合図」で同じ文字列なので、状態はここで持つ。
+    MARK の先頭トークンは機械可読（EP_START / EP_END / EP_DISCARD / RETURN / STOP / EXIT ...）。
+    """
+
+    REC = re.compile(r"\.py:\d+ Recording episode (\d+)\s*$")
+    START_POSE = re.compile(r"\.py:\d+ Episode (\d+) start pose: (.*)$")
+    WAITING = re.compile(r"\.py:\d+ Waiting:")
+    RESET = re.compile(r"\.py:\d+ Reset the environment")
+    RERECORD = re.compile(r"\.py:\d+ Re-record episode\s*$")
+    STOP = re.compile(r"\.py:\d+ Stop recording\s*$")
+    EXITING = re.compile(r"\.py:\d+ Exiting\s*$")
+    RC = re.compile(r"\[record(?:-bi)?\] lerobot-record exit=(-?\d+)")
+
+    def __init__(self) -> None:
+        self.recording = False
+        self.ep: int | None = None
+        self.take = 0
+
+    def _end(self, key: str) -> list[str]:
+        if not self.recording:
+            return []
+        self.recording = False
+        return [f"EP_END ep={self.ep} take={self.take} key={key}"]
+
+    def feed(self, line: str) -> list[str]:
+        line = line.rstrip()
+        if not line:
+            return []
+        if line.startswith("MARK "):
+            return [line[5:].strip()]
+        m = self.REC.search(line)
+        if m:
+            out = self._end("none")  # 念のため（通常は直前に終了の行がある）
+            self.ep = int(m.group(1))
+            self.take += 1
+            self.recording = True
+            return out + [f"EP_START ep={self.ep} take={self.take}"]
+        if "Right arrow key pressed" in line:
+            return self._end("right") or [f"CUE key=right next_after_ep={self.ep}"]
+        if "Left arrow key pressed" in line:
+            return self._end("left") or [f"KEY left (待機中・直前テイクの破棄要求) ep={self.ep}"]
+        if "Escape key pressed" in line:
+            return self._end("esc") + ["STOP_REQUEST key=esc"]
+        if "'a' key pressed" in line:
+            return [f"RETURN ep={self.ep}"]
+        if "Arm returned" in line:
+            return ["RETURN_DONE"]
+        if self.RERECORD.search(line):
+            return [f"EP_DISCARD ep={self.ep} take={self.take} reason=rerecord"]
+        if "No frames in the current take" in line:
+            return [f"EP_DISCARD ep={self.ep} take={self.take} reason=no_frames"]
+        if self.WAITING.search(line):
+            return self._end("timeout")  # 15 秒ごとの再掲は録画中でなければ無視
+        if self.RESET.search(line):
+            return self._end("timeout") + ["RESET_WINDOW"]
+        m = self.START_POSE.search(line)
+        if m:
+            return [f"START_POSE ep={m.group(1)} {m.group(2)[:160]}"]
+        if self.STOP.search(line):
+            return self._end("none") + ["EP_STOP"]
+        if self.EXITING.search(line):
+            return ["LEROBOT_EXITING"]
+        m = self.RC.search(line)
+        if m:
+            return [f"EXIT rc={m.group(1)}"]
+        return []
+
+
+def _follower(paths: list[str], out_q: "queue.Queue", stop: threading.Event, t0_mono: float,
+              poll_s: float = 0.1, from_start: tuple = ()) -> None:
+    """paths の追記分だけを読み（tail -F 相当・通常ファイルなので書き手を止めない）、境界行を MARK にする。
+
+    起動時に既にあるファイルは末尾から（設定要約など既存行は拾わない）、後から現れたファイルと
+    from_start に挙げたファイル（--marks・シェルが印を打つ専用ファイル）は先頭から読む。
+    完全な行だけを処理し、途中の行は次の読みに持ち越す。tqdm 等の \r 上書きは \r でも分割する。
+    stop が立った後に 1 回だけ最後の読みをしてから抜ける（終了直前の Stop recording 等を落とさない）。
+    """
+    marker = EpisodeMarker()
+    st: dict[str, dict] = {}
+    for p in paths:
+        st[p] = {"fh": None, "buf": b"", "pos": 0, "from_start": p in from_start or not os.path.exists(p)}
+
+    def pump() -> None:
+        for p, s in st.items():
+            try:
+                if s["fh"] is None:
+                    if not os.path.exists(p):
+                        continue
+                    s["fh"] = open(p, "rb")
+                    if not s["from_start"]:
+                        s["fh"].seek(0, os.SEEK_END)
+                    s["pos"] = s["fh"].tell()
+                fh = s["fh"]
+                size = os.fstat(fh.fileno()).st_size
+                if size < s["pos"]:  # 切り詰められた → 頭から
+                    fh.seek(0)
+                    s["buf"] = b""
+                chunk = fh.read()
+                s["pos"] = fh.tell()
+            except OSError:
+                continue
+            if not chunk:
+                continue
+            s["buf"] += chunk
+            *lines, s["buf"] = s["buf"].split(b"\n")
+            for raw in lines:
+                for seg in raw.decode("utf-8", errors="replace").split("\r"):
+                    for text in marker.feed(seg):
+                        out_q.put(_mark_row(text, t0_mono))
+
+    while not stop.is_set():
+        pump()
+        stop.wait(poll_s)
+    pump()
+    for s in st.values():
+        if s["fh"] is not None:
+            s["fh"].close()
+
+
+def episode_table(marks: list[tuple[str, str]], exit_rc: str | None = None) -> list[str]:
+    """MARK（(t_rel, text) の列）からテイク表を作る。1 テイク 1 行・データセットの episode 番号と 1 対 1。
+
+    保存の判定（lerobot は保存の行を出さないので推定）:
+      EP_DISCARD が付いたテイク → 破棄。次のテイクの ep が +1 → 保存。最後のテイクは EP_STOP まで
+      破棄が無く、終了コードが 0 なら保存（推定）、それ以外は不明（Ctrl-C で落ちたら未保存のことがある）。
+    """
+    takes: list[dict] = []
+    kv = re.compile(r"(\w+)=(\S+)")
+    for t_rel, text in marks:
+        head = text.split(" ", 1)[0]
+        d = dict(kv.findall(text))
+        if head == "EP_START":
+            takes.append({"ep": d.get("ep"), "take": d.get("take"), "t0": float(t_rel), "t1": None,
+                          "key": "-", "status": None})
+        elif head == "EP_END" and takes:
+            takes[-1]["t1"] = float(t_rel)
+            takes[-1]["key"] = d.get("key", "-")
+        elif head == "EP_DISCARD" and takes:
+            takes[-1]["status"] = "破棄(" + d.get("reason", "?") + ")"
+        elif head == "EXIT" and exit_rc is None:
+            exit_rc = d.get("rc")
+    for i, tk in enumerate(takes):
+        if tk["status"]:
+            continue
+        nxt = takes[i + 1] if i + 1 < len(takes) else None
+        if nxt is not None:
+            try:
+                tk["status"] = "保存" if int(nxt["ep"]) == int(tk["ep"]) + 1 else "破棄(番号が進まず)"
+            except (TypeError, ValueError):
+                tk["status"] = "不明"
+        else:
+            tk["status"] = "保存(推定)" if exit_rc == "0" else f"不明(exit={exit_rc})"
+    lines = []
+    for tk in takes:
+        dur = f"{tk['t1'] - tk['t0']:.1f}s" if tk["t1"] is not None else "-"
+        t1 = f"{tk['t1']:.1f}" if tk["t1"] is not None else "-"
+        lines.append(f"   ep={tk['ep']} take={tk['take']} t_rel={tk['t0']:.1f}-{t1}s ({dur}) "
+                     f"end={tk['key']} → {tk['status']}")
+    kept = sum(1 for tk in takes if tk["status"].startswith("保存"))
+    if takes:
+        lines.insert(0, f"テイク {len(takes)} 本（保存 {kept}・それ以外 {len(takes) - kept}）")
+    return lines
+
+
+def run_logger(ifaces: list[str], out_path: str, print_every: float, follow: list[str] | None = None,
+               summary_out: str | None = None, watch_pid: int | None = None,
+               pid_file: str | None = None, marks_files: list[str] | None = None) -> int:
     import can  # noqa: F401 - 早期に import エラーを出す
 
     t0_mono = time.monotonic()
@@ -172,17 +365,45 @@ def run_logger(ifaces: list[str], out_path: str, print_every: float) -> int:
     out_q: "queue.Queue" = queue.Queue()
     stop = threading.Event()
 
+    # 裏で起動されたとき（bash の & は SIGINT を無視させる）は SIGTERM / SIGHUP で止める。
+    # 例外を投げず旗を立てるだけにする（行の書きかけで割り込まない）。メインループが 0.2 秒以内に拾う。
+    stop_reason: list[str] = []
+
+    def _on_signal(signum, _frame) -> None:
+        stop_reason.append(signal.Signals(signum).name)
+
+    for _sig in (signal.SIGTERM, signal.SIGHUP):
+        try:
+            signal.signal(_sig, _on_signal)
+        except (ValueError, OSError):
+            pass
+    if pid_file:
+        try:
+            with open(pid_file, "w") as pf:
+                pf.write(f"{os.getpid()}\n")
+        except OSError as exc:
+            print(f"!! pid-file: {exc}", file=sys.stderr)
+
     f = open(out_path, "w", newline="")
     f.write(f"# start_wall={start_wall.isoformat()} host={__import__('socket').gethostname()} "
             f"ifaces={','.join(ifaces)}\n")
     writer = csv.DictWriter(f, fieldnames=CSV_FIELDS)
     writer.writeheader()
 
-    readers = [threading.Thread(target=_reader, args=(i, out_q, stop, t0_mono), daemon=True) for i in ifaces]
+    open_failed: list[str] = []
+    readers = [threading.Thread(target=_reader, args=(i, out_q, stop, t0_mono, open_failed), daemon=True)
+               for i in ifaces]
     marker = threading.Thread(target=_stdin_marker, args=(out_q, stop, t0_mono), daemon=True)
+    follower = None
+    if follow or marks_files:
+        follower = threading.Thread(target=_follower, daemon=True,
+                                    args=(list(follow or []) + list(marks_files or []), out_q, stop, t0_mono),
+                                    kwargs={"from_start": tuple(marks_files or [])})
     for t in readers:
         t.start()
     marker.start()
+    if follower is not None:
+        follower.start()
 
     # 状態管理: 直近5秒の |tau| リングバッファと現在 state（初回遷移検出用）
     ring: dict[tuple, list[tuple[float, float]]] = {}
@@ -223,6 +444,13 @@ def run_logger(ifaces: list[str], out_path: str, print_every: float) -> int:
     last_stats = time.monotonic()
     counts: dict[str, int] = {i: 0 for i in ifaces}
     tmax_seen: dict[tuple, int] = {}
+    tmos_seen: dict[tuple, int] = {}
+    marks: list[tuple[str, str]] = []
+    events: list[str] = []          # LOST / BACK / 状態遷移（要約用）
+    n_lost = 0
+    n_back = 0
+    last_watch = time.monotonic()
+    last_lost_check = 0.0
     last_print = time.monotonic()
     last_any = time.monotonic()
     last_flush = time.monotonic()
@@ -257,23 +485,36 @@ def run_logger(ifaces: list[str], out_path: str, print_every: float) -> int:
                         msg = f"BACK {row['iface']} {row['motor']} at t_rel={t_rel:.2f}s posture[{posture(row['iface'])}] canstat[{can_stats(row['iface'])}]"
                         print(">>> " + msg)
                         writer.writerow(blank_row(t_rel, "EVENT", msg))
+                        n_back += 1
+                        events.append(msg)
                     prev = cur_state.get(key)
                     cur_state[key] = st
                     tmax_seen[key] = max(tmax_seen.get(key, 0), int(row["t_rotor"]))
+                    tmos_seen[key] = max(tmos_seen.get(key, 0), int(row["t_mos"]))
                     if prev is not None and prev in (0, 1) and st not in (0, 1):
                         tau_peak5 = max((abs(x[1]) for x in buf), default=0.0)
-                        print(f"!!! {row['iface']} {row['motor']} {STATE.get(prev, prev)}->"
-                              f"{row['state_name']} at t_rel={t_rel:.2f}s wall={row['t_wall']} "
-                              f"T_mos={row['t_mos']} T_rotor={row['t_rotor']} "
-                              f"|tau| max(prev 5s)={tau_peak5:.2f}")
+                        msg = (f"{row['iface']} {row['motor']} {STATE.get(prev, prev)}->"
+                               f"{row['state_name']} at t_rel={t_rel:.2f}s wall={row['t_wall']} "
+                               f"T_mos={row['t_mos']} T_rotor={row['t_rotor']} "
+                               f"|tau| max(prev 5s)={tau_peak5:.2f}")
+                        print("!!! " + msg)
+                        events.append("STATE " + msg)
                 else:
                     print(f"MARK t_rel={row['t_rel']}s: {row['motor']}")
+                    marks.append((row["t_rel"], row["motor"]))
                 last_any = time.monotonic()
 
             now = time.monotonic()
             # LOST 判定: バスは生きている（0.3 秒以内に誰かが応答）のに、そのモータだけ 0.3 秒以上無応答
             t_now_rel = now - t0_mono
-            for key, seen in list(last_seen.items()):
+            # 判定は 50ms に 1 回で足りる（閾値 0.3 秒）。従来は受信 1 行ごとに全モータを走査していて、
+            # teleop 200Hz×32 モータでは CPU の大半がここだった（2026-10-05・record と並走させるため間引く）。
+            if now - last_lost_check < 0.05:
+                last_seen_items = ()
+            else:
+                last_lost_check = now
+                last_seen_items = list(last_seen.items())
+            for key, seen in last_seen_items:
                 iface_v, motor_v = key
                 if key in lost:
                     continue
@@ -282,6 +523,8 @@ def run_logger(ifaces: list[str], out_path: str, print_every: float) -> int:
                     msg = f"LOST {iface_v} {motor_v} at t_rel={t_now_rel:.2f}s (last seen {seen:.2f}s) posture[{posture(iface_v)}] canstat[{can_stats(iface_v)}]"
                     print(">>> " + msg)
                     writer.writerow(blank_row(t_now_rel, "EVENT", msg))
+                    n_lost += 1
+                    events.append(msg)
             if now - last_stats >= 1.0:
                 for iface_v in ifaces:
                     writer.writerow(blank_row(t_now_rel, "CANSTAT", f"{iface_v} {can_stats(iface_v)}"))
@@ -303,15 +546,96 @@ def run_logger(ifaces: list[str], out_path: str, print_every: float) -> int:
                 if now - last_any > 10.0:
                     print("(受信なし: teleop 未起動か未給電)")
                 last_print = now
+            if watch_pid and now - last_watch >= 1.0:
+                last_watch = now
+                try:
+                    os.kill(watch_pid, 0)
+                    with open(f"/proc/{watch_pid}/stat") as sf_:  # 回収待ちのゾンビも「消えた」扱い
+                        if sf_.read().rsplit(")", 1)[-1].split()[0] == "Z":
+                            stop_reason.append(f"watch-pid {watch_pid} gone (zombie)")
+                except ProcessLookupError:
+                    stop_reason.append(f"watch-pid {watch_pid} gone")
+                except (OSError, IndexError):
+                    pass
+            if stop_reason:
+                print(f"stop requested: {stop_reason[0]}")
+                break
     except KeyboardInterrupt:
-        pass
+        stop_reason.append("SIGINT")
     finally:
         stop.set()
         for t in readers:
             t.join(timeout=1.0)
+        if follower is not None:
+            follower.join(timeout=2.0)
+        # 止める直前に積まれた行（受信・MARK）も書く（従来は queue に残った分を捨てていた）
+        while True:
+            try:
+                row = out_q.get_nowait()
+            except queue.Empty:
+                break
+            try:
+                writer.writerow(row)
+            except Exception:  # noqa: BLE001
+                continue
+            if row.get("iface") == "MARK":
+                marks.append((row["t_rel"], row["motor"]))
         f.flush()
         f.close()
+        if summary_out:
+            try:
+                lines = _logger_summary(out_path, start_wall, time.monotonic() - t0_mono, ifaces, counts,
+                                        open_failed, tmax_seen, tmos_seen, n_lost, n_back, events, marks,
+                                        stop_reason, can_stats)
+                with open(summary_out, "w") as sf:
+                    sf.write("\n".join(lines) + "\n")
+            except Exception as exc:  # noqa: BLE001 - 要約の失敗で CSV を巻き込まない
+                print(f"!! summary failed: {exc}", file=sys.stderr)
+        if pid_file:
+            try:
+                os.remove(pid_file)
+            except OSError:
+                pass
     return 0
+
+
+def _logger_summary(out_path, start_wall, elapsed, ifaces, counts, open_failed, tmax_seen, tmos_seen,
+                    n_lost, n_back, events, marks, stop_reason, can_stats) -> list[str]:
+    """停止時の短い要約（CSV を読み直さない・一瞬で終わる）。'== MARK (全件)' 以降は端末に出さない前提。"""
+    el = max(elapsed, 1e-6)
+    out = [f"Damiao フィードバック記録の要約: {out_path}",
+           f"記録時間 {elapsed:.0f}s（start_wall={start_wall.isoformat(timespec='seconds')}）"
+           f" 停止={stop_reason[0] if stop_reason else '-'}"]
+    for i in ifaces:
+        motors = sorted(m for (ii, m) in tmax_seen if ii == i)
+        if i in open_failed:
+            out.append(f"{i}: open failed（この iface は記録していない）")
+            continue
+        if not motors:
+            out.append(f"{i}: 受信 0 件")
+            continue
+        worst = max(motors, key=lambda m: tmax_seen[(i, m)])
+        out.append(f"{i}: {counts.get(i, 0) / el:.0f} f/s  モータ {len(motors)}  最大 T_rotor="
+                   f"{tmax_seen[(i, worst)]}C@{worst}  最大 T_mos={max(tmos_seen.get((i, m), 0) for m in motors)}C")
+    grip = [f"{i}={tmax_seen[(i, 'gripper')]}C" for i in ifaces if (i, "gripper") in tmax_seen]
+    out.append("gripper 最大 T_rotor: " + (" ".join(grip) if grip else "受信なし"))
+    n_state = sum(1 for e in events if e.startswith("STATE "))
+    out.append(f"LOST {n_lost} 回 / BACK {n_back} 回 / エラー状態への遷移 {n_state} 回")
+    for e in events[:8]:
+        out.append("  " + e[:220])
+    if len(events) > 8:
+        out.append(f"  ...ほか {len(events) - 8} 件（CSV の iface=EVENT と --report を参照）")
+    tbl = episode_table(marks)
+    if tbl:
+        out.append("エピソード（MARK から）: " + tbl[0])
+        out.extend(tbl[1:])
+    for i in ifaces:
+        if i not in open_failed:
+            out.append(f"canstat {i}: {can_stats(i) or 'n/a'}")
+    out.append(f"MARK {len(marks)} 行")
+    out.append("== MARK (全件)")
+    out.extend(f"   t_rel={t}s: {txt}" for t, txt in marks)
+    return out
 
 
 # ---------------------------------------------------------------- report --
@@ -365,8 +689,16 @@ def _trapz_sq(ts: list[float], vs: list[float]) -> float:
 
 def run_report(path: str, pre_s: float, window_s: float) -> int:
     rows = _read_csv_rows(path)
-    data_rows = [r for r in rows if r.get("iface") != "MARK"]
+    # EVENT（LOST/BACK）と CANSTAT（毎秒のバス統計）はモータの行ではないので分ける（2026-10-05）。
+    # 従来はモータ扱いで 1 行ずつ "-- CANSTAT ..." が出て、長い記録では出力が数千行に膨れていた。
+    data_rows = [r for r in rows if r.get("iface") not in ("MARK", "EVENT", "CANSTAT")]
     marks = [r for r in rows if r.get("iface") == "MARK"]
+    event_rows = [r for r in rows if r.get("iface") == "EVENT"]
+    canstat_last: dict[str, str] = {}
+    for r in rows:
+        if r.get("iface") == "CANSTAT":
+            name, _, rest = (r.get("motor") or "").partition(" ")
+            canstat_last[name] = rest
 
     by_key: dict[tuple, list[dict]] = {}
     for r in data_rows:
@@ -561,7 +893,21 @@ def run_report(path: str, pre_s: float, window_s: float) -> int:
             print(f"   {motor}: |e|max={max(abs_e):.3f}rad |e|mean={sum(abs_e)/len(abs_e):.3f}rad "
                   f"kp*|e|max~{kp*max(abs_e):.2f}Nm kp*|e|mean~{kp*sum(abs_e)/len(abs_e):.2f}Nm")
 
+    if event_rows or canstat_last:
+        n_lost = sum(1 for r in event_rows if (r.get("motor") or "").startswith("LOST"))
+        n_back = sum(1 for r in event_rows if (r.get("motor") or "").startswith("BACK"))
+        print(f"== EVENT: LOST {n_lost} 回 / BACK {n_back} 回")
+        for r in event_rows:
+            print(f"   t_rel={r['t_rel']}s: {r['motor']}")
+        for name, rest in sorted(canstat_last.items()):
+            print(f"   canstat(最後) {name}: {rest or 'n/a'}")
+
     if marks:
+        tbl = episode_table([(m["t_rel"], m["motor"]) for m in marks])
+        if tbl:
+            print("== エピソード（MARK から）: " + tbl[0])
+            for line in tbl[1:]:
+                print(line)
         print("== MARK")
         for m in marks:
             print(f"   t_rel={m['t_rel']}s: {m['motor']}")
@@ -686,8 +1032,81 @@ def run_selftest() -> int:
         os.remove(path)
 
     print("report synthetic test: " + ("PASS" if ok else "FAIL"))
+
+    # 3) --follow: console.log の追記からエピソード境界の MARK を作る（2026-10-05）
+    ok_follow = _selftest_follow()
+    ok = ok and ok_follow
+    print("follow/episode-mark test: " + ("PASS" if ok_follow else "FAIL"))
     print("SELFTEST " + ("PASS" if ok else "FAIL"))
     return 0 if ok else 1
+
+
+def _selftest_follow() -> bool:
+    """既存行は拾わない・途中行の持ち越し・\r 区切り・後から現れるファイル・保存の推定、を確かめる。"""
+    import tempfile
+
+    ok = True
+    with tempfile.TemporaryDirectory() as td:
+        console = os.path.join(td, "console.log")
+        marks_path = os.path.join(td, "x.marks")
+        with open(console, "w") as fc:
+            fc.write("INFO 2026-10-05 10:00:00 ls/utils.py:143 Recording episode 99\n")  # 起動前の行（拾わない）
+        q: "queue.Queue" = queue.Queue()
+        stop = threading.Event()
+        th = threading.Thread(target=_follower, args=([console, marks_path], q, stop, time.monotonic(), 0.02),
+                              daemon=True)
+        th.start()
+        time.sleep(0.1)
+        chunks = [
+            "INFO 2026-10-05 10:00:01 t_record.py:346 Episode 0 start pose: worst left_joint_1.pos=1.3deg "
+            "(tolerance 3.0deg, outcome=started).\n",
+            "INFO 2026-10-05 10:00:01 ls/utils.py:143 Recording episode 0\n",
+            "Right arrow key pressed. Exiting loop...\n",
+            "INFO 2026-10-05 10:00:20 ol_utils.py:784 Waiting: press 'a' to return both arms ...\n",
+            "INFO 2026-10-05 10:00:35 ol_utils.py:784 Waiting: press 'a' to return both arms ...\n",
+            "'a' key pressed. Aligning the arm to the start pose...\n",
+            "INFO 2026-10-05 10:00:40 ls/utils.py:143 Arm returned. Restore the scene, then press the right arrow\n",
+            "Right arrow key pressed. Exiting loop...\n",
+            "INFO 2026-10-05 10:00:41 ls/utils.py:143 Recording episode 1\n",
+            "Left arrow key pressed. Exiting loop and rerecord the last episode...\n",
+            "INFO 2026-10-05 10:00:45 ls/utils.py:143 Re-record episode\n",
+            "INFO 2026-10-05 10:00:50 ls/utils.py:143 Record",  # 途中行（次の書き込みで完成）
+            "ing episode 1\n",
+            "Map:   0%|          | 0/1 [00:00<?, ?it/s]\rEscape key pressed. Stopping data recording...\n",
+            "INFO 2026-10-05 10:01:10 ls/utils.py:143 Stop recording\n",
+            "INFO 2026-10-05 10:01:14 ls/utils.py:143 Exiting\n",
+        ]
+        for c in chunks:
+            with open(console, "a") as fc:
+                fc.write(c)
+            time.sleep(0.04)
+        with open(marks_path, "a") as fm:  # 起動後に現れたファイルは先頭から読む
+            fm.write("MARK EXIT rc=0\n")
+        time.sleep(0.1)
+        stop.set()
+        th.join(timeout=2.0)
+    got = []
+    while not q.empty():
+        got.append(q.get()["motor"])
+    expect_prefix = [
+        "START_POSE ep=0", "EP_START ep=0 take=1", "EP_END ep=0 take=1 key=right", "RETURN ep=0",
+        "RETURN_DONE", "CUE key=right", "EP_START ep=1 take=2", "EP_END ep=1 take=2 key=left",
+        "EP_DISCARD ep=1 take=2 reason=rerecord", "EP_START ep=1 take=3", "EP_END ep=1 take=3 key=esc",
+        "STOP_REQUEST key=esc", "EP_STOP", "LEROBOT_EXITING", "EXIT rc=0",
+    ]
+    if len(got) != len(expect_prefix) or any(not g.startswith(e) for g, e in zip(got, expect_prefix)):
+        print("FAIL follow marks:")
+        for g in got:
+            print("   got: " + g)
+        ok = False
+    tbl = episode_table([(f"{i}.0", g) for i, g in enumerate(got)])
+    want = ["→ 保存", "→ 破棄(rerecord)", "→ 保存(推定)"]
+    if len(tbl) != 4 or any(not tbl[i + 1].endswith(w) for i, w in enumerate(want)):
+        print("FAIL episode table:")
+        for line in tbl:
+            print("   " + line)
+        ok = False
+    return ok
 
 
 # -------------------------------------------------------------------- cli --
@@ -701,6 +1120,13 @@ def main() -> int:
     ap.add_argument("--pre", type=float, default=5.0, help="--report: 最初のエラー前の統計窓[s]")
     ap.add_argument("--window", type=float, default=30.0, help="--report: 傾き計算等の窓[s]")
     ap.add_argument("--selftest", action="store_true")
+    ap.add_argument("--follow", action="append", default=[], metavar="FILE",
+                    help="追記を読んでエピソード境界や 'MARK <text>' 行を MARK にする（複数可）")
+    ap.add_argument("--marks", action="append", default=[], metavar="FILE",
+                    help="--follow と同じだが先頭から読む（シェルが 'MARK <text>' を追記する専用ファイル）")
+    ap.add_argument("--summary-out", default=None, help="停止時の短い要約の書き出し先")
+    ap.add_argument("--watch-pid", type=int, default=None, help="この PID が消えたら止まる（孤児防止）")
+    ap.add_argument("--pid-file", default=None, help="自分の PID を書く（停止側が使う・終了時に消す）")
     args = ap.parse_args()
 
     if args.selftest:
@@ -710,7 +1136,8 @@ def main() -> int:
     if not args.ifaces:
         ap.error("ifaces が必要です（--report / --selftest でない場合）")
     out_path = args.out or f"./damiao-feedback-{dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.csv"
-    return run_logger(args.ifaces, out_path, args.print_every)
+    return run_logger(args.ifaces, out_path, args.print_every, follow=args.follow, summary_out=args.summary_out,
+                      watch_pid=args.watch_pid, pid_file=args.pid_file, marks_files=args.marks)
 
 
 if __name__ == "__main__":

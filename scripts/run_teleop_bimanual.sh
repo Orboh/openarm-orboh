@@ -5,6 +5,10 @@
 # ⚠ 起動時は両腕を真下に垂らす（零位が焼かれる）。右系統CANはbus-off既往。
 # NOTE: leader 側は左右とも gravity_side を明示する（未指定だと既定 left＝右腕の重力補償が左モデルで誤計算される。2026-06-23 修正）。
 # 前提: lerobot venv は ~/projects/lerobot/.venv（Vector/Thor 共通）。URDF はリポ相対参照。
+# Damiao CAN フィードバックの自動記録（2026-10-05・scripts/lib/dmlog.sh）: 起動と同時に受信専用ロガーを裏で起こし、
+# テレオペの終了後（Ctrl-C・esc とも、脱力の瞬間まで残して）止めて要約を出す。別端末でロガーを立て直す手間は不要。
+# 記録は ~/collections/dmlog-teleop-<MMDD-HHMMSS>.csv（DMLOG_DIR で置き場所を変える）。DMLOG=off で従来どおり
+#   （例: DMLOG=off bash scripts/run_teleop_bimanual.sh）。重いときは DMLOG_IFACES="can_fol_l can_fol_r"。
 LSCALE="${1:-1.0}"
 RSCALE="${2:-$LSCALE}"
 # 3 番目以降の引数は lerobot-teleoperate へそのまま渡す（例: グリッパの kp を下げる
@@ -21,11 +25,15 @@ BIN="$HOME/projects/lerobot/.venv/bin/lerobot-teleoperate"
 # 開始姿勢: 開始姿勢セット（config/pose_sets/<POSE_SET>/・未指定なら CURRENT）の left/right.yaml。
 # セットに無い側の腕は公式既定(肘36°)にフォールバック。
 source "$REPO/scripts/lib/pose_set.sh"
+source "$REPO/scripts/lib/dmlog.sh"
 pose_set_load current || exit 1
 pose_set_check teleop
 POSE_ARGS=()
 [ -f "$LPOSE" ] && POSE_ARGS+=(--robot.left_arm_config.initial_pose_path="$LPOSE" --teleop.left_arm_config.initial_pose_path="$LPOSE")
 [ -f "$RPOSE" ] && POSE_ARGS+=(--robot.right_arm_config.initial_pose_path="$RPOSE" --teleop.right_arm_config.initial_pose_path="$RPOSE")
+dmlog_start "${DMLOG_DIR:-$HOME/collections}/dmlog-teleop-$(date +%m%d-%H%M%S)" "$HOME/projects/lerobot/.venv/bin/python" "" \
+  can_fol_l can_fol_r can_lead_l can_lead_r
+dmlog_mark "TELEOP_START lscale=$LSCALE rscale=$RSCALE pose_set=$POSE_SET"
 "$BIN" \
   --robot.type=bi_openarm_follower \
   --robot.left_arm_config.port=can_fol_l --robot.left_arm_config.side=left \
@@ -51,3 +59,6 @@ POSE_ARGS=()
   --fps=200 \
   "${POSE_ARGS[@]}" \
   ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}
+RC=$?
+dmlog_stop "rc=$RC"
+exit "$RC"

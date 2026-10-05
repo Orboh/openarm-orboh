@@ -14,6 +14,8 @@
 #   DISPLAY_SCALE=1 DISPLAY_JPEG_QUALITY=95 bash scripts/collect_bimanual.sh gate   # 表示用画像を間引かず原寸・q95 で流す（既定は 1/2・q60。表示のみ、データは無関係）
 #   DISPLAY_STRIDE=3 bash scripts/collect_bimanual.sh gate   # 表示用画像を 3 フレームに 1 回だけ流す（関節値は毎フレーム）
 #   VIEWER_KEEP=true bash scripts/collect_bimanual.sh gate   # 起動時にビューアを作り直さない（既定は作り直す＝古い recording が前面に残って映像が止まって見える事故の防止・2026-09-22）
+#   DMLOG=off bash scripts/collect_bimanual.sh gate          # Damiao CAN フィードバックの自動記録を切る（既定は on＝record が裏で受信専用ロガーを起こし、
+#                                                            #   run_dir に dmlog-<tag>.csv・エピソード境界の MARK・要約を残す・2026-10-05。別端末のロガーは不要）
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 ENV_FILE="${ENV_FILE:-$REPO/config/bimanual-collect.env}"
