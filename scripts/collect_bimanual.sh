@@ -9,7 +9,8 @@
 #   bash scripts/collect_bimanual.sh session s2 [10]     # 続きのセッション（タグ <slug>-v1-s2・本数既定 10）
 #   RESUME=true DATASET_ROOT=... bash scripts/collect_bimanual.sh session s2   # 既存データセットへ追記（本体の契約どおり）
 #   DISPLAY_IP=<手元PC> DISPLAY_PORT=9876 bash scripts/collect_bimanual.sh gate # 手元の rerun へ映像を飛ばす
-#   MONITOR=off bash scripts/collect_bimanual.sh gate      # record 中の映像をモニターに出さない（既定は on＝Thor のビューア :9876 へ 3 眼と関節値を流す・2026-09-22 Kento）
+#   MONITOR=off bash scripts/collect_bimanual.sh gate      # record 中の映像をモニターに出さない（既定は on＝Thor のビューア :9876 へ 3 眼を流す・2026-09-22 Kento。関節値は 2026-10-05 から既定で送らない）
+#   DISPLAY_SCALARS=true bash scripts/collect_bimanual.sh gate   # 関節値の時系列もモニターに流す（9/22 にビューアが数分で固まった挙動。表示のみ）
 #   GRIPPER_KP=12 bash scripts/collect_bimanual.sh gate      # follower gripper の kp を下げる(熱対策・2026-09-21。env に書いてもよい)
 #   DISPLAY_SCALE=1 DISPLAY_JPEG_QUALITY=95 bash scripts/collect_bimanual.sh gate   # 表示用画像を間引かず原寸・q95 で流す（既定は 1/2・q60。表示のみ、データは無関係）
 #   DISPLAY_STRIDE=3 bash scripts/collect_bimanual.sh gate   # 表示用画像を 3 フレームに 1 回だけ流す（関節値は毎フレーム）
@@ -96,7 +97,12 @@ fi
 # する。データセットには影響しない（表示コピーのみ）。
 if [ "$DISPLAY_DATA" = true ]; then
   export LEROBOT_DISPLAY_IMAGE_SCALE="${DISPLAY_SCALE:-2}" LEROBOT_DISPLAY_JPEG_QUALITY="${DISPLAY_JPEG_QUALITY:-60}" LEROBOT_DISPLAY_IMAGE_STRIDE="${DISPLAY_STRIDE:-1}"
-  MON_NOTE="$MON_NOTE 1/${LEROBOT_DISPLAY_IMAGE_SCALE} q${LEROBOT_DISPLAY_JPEG_QUALITY} stride${LEROBOT_DISPLAY_IMAGE_STRIDE}"
+  # 関節値はモニターに送らず映像だけにする（2026-10-05）。映像は lerobot が「最新 1 枚」（static）で送るので溜まらないが、
+  # 関節値は約 40 本の時系列として 30 Hz で溜まり続け、ビューアが全履歴を毎フレーム描き直して数分で CPU 150〜250% に
+  # 張り付きモニターが固まった（2026-09-22 gate・精密記録 §2 の 46）。表示のみでデータセットには影響しない。
+  # 関節値のグラフも見たいときは DISPLAY_SCALARS=true（9/22 と同じ挙動に戻る）。
+  export LEROBOT_DISPLAY_SCALARS="${DISPLAY_SCALARS:-false}"
+  MON_NOTE="$MON_NOTE 1/${LEROBOT_DISPLAY_IMAGE_SCALE} q${LEROBOT_DISPLAY_JPEG_QUALITY} stride${LEROBOT_DISPLAY_IMAGE_STRIDE} scalars=${LEROBOT_DISPLAY_SCALARS}"
 fi
 export OPERATOR TASK TASK_SLUG EPISODE_TIME_S LSCALE RSCALE
 export CAM_SERIAL="${CHEST_SERIAL:-344422070898}"
