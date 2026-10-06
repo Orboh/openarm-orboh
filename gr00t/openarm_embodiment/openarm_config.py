@@ -18,6 +18,12 @@ importlib で動的ロードされ、トップレベルの register_modality_con
   増やす                 : OPENARM_CAMERAS=chest,wrist_right,overhead
 学習に使うデータセットの meta/modality.json（gen_modality_json.py で生成）と一致させる。
 
+チャンク長（1 回の推論で出す step 数・action の delta_indices）:
+  既定 16（SO100 踏襲）。OPENARM_ACTION_HORIZON=32 で 32（2026-10-07・RTC を活かす比較用。上流の
+  real_world_deployment.md は RTC に 32 以上を勧める）。**学習・統計値（stats.py が作る relative_stats.json は
+  チャンク長で変わる）・推論サーバで同じ値にそろえる。** 推論サーバは学習済みモデルの processor から
+  チャンク長を読むので、推論側で指定する必要はない。
+
 action rep: 腕（single_arm / right_arm / left_arm）=RELATIVE（N1.7 finetune_new_embodiment.md 推奨・
 汎化有利）/ グリッパ（gripper / right_gripper / left_gripper）=ABSOLUTE（SO100 既定）。
 収集データは絶対関節角のままで可（delta 化は内部処理）。state_key は指定しない（action_key と
@@ -44,6 +50,9 @@ from gr00t.data.types import (  # noqa: E402
 )
 
 CAMERAS = cameras_from_env()
+ACTION_HORIZON = int(os.environ.get("OPENARM_ACTION_HORIZON", "16"))
+if not 1 <= ACTION_HORIZON <= 40:
+    raise ValueError(f"OPENARM_ACTION_HORIZON は 1〜40（N1.7 の max_action_horizon）: {ACTION_HORIZON}")
 LAYOUT = layout_from_env()
 KEYS = modality_keys(LAYOUT)
 STATE_NAMES = state_names(LAYOUT)
@@ -58,7 +67,7 @@ openarm_config = {
         modality_keys=list(KEYS),
     ),
     "action": ModalityConfig(
-        delta_indices=list(range(0, 16)),  # SO100 踏襲の action horizon（暫定）
+        delta_indices=list(range(0, ACTION_HORIZON)),  # 既定 16（SO100 踏襲）・OPENARM_ACTION_HORIZON で変える
         modality_keys=list(KEYS),
         action_configs=[
             ActionConfig(
@@ -76,4 +85,4 @@ openarm_config = {
 }
 
 register_modality_config(openarm_config, embodiment_tag=EmbodimentTag.NEW_EMBODIMENT)
-print(f"[openarm_config] NEW_EMBODIMENT registered: layout={LAYOUT} keys={KEYS} cameras={CAMERAS}", file=sys.stderr)
+print(f"[openarm_config] NEW_EMBODIMENT registered: layout={LAYOUT} keys={KEYS} cameras={CAMERAS} action_horizon={ACTION_HORIZON}", file=sys.stderr)

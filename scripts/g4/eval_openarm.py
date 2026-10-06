@@ -164,7 +164,7 @@ class PolicyClient:
         except Exception:
             return False
 
-    def get_action(self, observations: dict):
+    def get_action(self, observations: dict, options: dict | None = None):
         """
         サーバとの契約（`gr00t/policy/server_client.py` 実読・2026-07-22）:
           - サーバは `handler.handler(**request["data"])` と **キーワード展開して呼ぶ**ため、
@@ -172,8 +172,13 @@ class PolicyClient:
             （`policy.get_action(self, observation, options=None)` に対応）
           - 正常時の戻り値は **`(action, info)` のタプル**
           - 例外時は **`{"error": "..."}`** が返る（成功と同じ経路で来るので明示的に検出する）
+          - `options` は RTC のときだけ渡す（2026-10-07・`gr00t_rtc_server.py` だけが読む。
+            公式の Gr00tPolicy は捨てる）。None のときは従来どおり `options` を送らない。
         """
-        resp = self.call_endpoint("get_action", {"observation": observations})
+        data = {"observation": observations}
+        if options is not None:
+            data["options"] = options
+        resp = self.call_endpoint("get_action", data)
 
         if isinstance(resp, dict) and "error" in resp and len(resp) == 1:
             raise RuntimeError(f"PolicyServer 側でエラー: {resp['error']}")
@@ -287,6 +292,19 @@ class OpenArmAdapter:
         horizon = action_chunk[any_key].shape[1]  # (B, T, D) → T
         return [self.decode_action_chunk(action_chunk, t) for t in range(horizon)]
 
+    def get_chunk(self, obs: Dict, options: dict | None = None):
+        """get_action と同じ推論で、チャンクの生の配列（{modality_key: (B, T, D)}）と info も返す。
+
+        RTC で前のチャンクの続きを送るとき、生の配列から modality キーごとに切り出す（2026-10-07）。
+        """
+        model_input = self.obs_to_policy_inputs(obs)
+        action_chunk, info = self.policy.get_action(model_input, options)
+        any_key = next(iter(action_chunk.keys()))
+        horizon = action_chunk[any_key].shape[1]
+        actions = [self.decode_action_chunk(action_chunk, t) for t in range(horizon)]
+        raw = {key: np.asarray(action_chunk[key]) for key, _, _ in self.groups}
+        return actions, raw, (info if isinstance(info, dict) else {})
+
 
 @dataclass
 class EvalConfig:
@@ -375,6 +393,30 @@ class EvalConfig:
     camera_keys: str | None = None
 
     play_sounds: bool = False
+
+    # ---- 推論の停止を隠す（2026-10-07・設計は Vault の gr00t-async-inference-rtc-design）----
+    # inference_mode:
+    #   "sync"  : 観測 → 推論を待つ → action_horizon step を流す、の直列（従来）。推論中は指令が止まる。
+    #   "async" : 前のチャンクを流しながら裏のスレッドで次を推論する。届いたら「観測の tick から何 step
+    #             過ぎたか」(k) を数え、新しいチャンクの k 番目から流す（0〜k-1 は過ぎた時刻の分なので捨てる）。
+    #             次の推論は切り替えの直後に始める。action_horizon は使わない（チャンクを使い切る前に切り替わる）。
+    #             前のチャンクを使い切っても次が来なければ、最後の指令を保って待つ（underrun として記録）。
+    # rtc: Real-Time Chunking。推論のときに、新しいチャンクの冒頭に当たる前のチャンクの指令を
+    #   options.rtc で送り、続きとして生成させる。**scripts/g4/gr00t_rtc_server.py のサーバが要る**
+    #   （公式の run_gr00t_server.py は options を捨てるので効かない）。
+    #   - sync で使う: 前のチャンクの残り（チャンク長 - action_horizon step）を冒頭に置く。frozen は
+    #     min(rtc_frozen, 残り)。action_horizon をチャンク長より小さくしないと残りが無い（例: 16 step のモデルで
+    #     action_horizon=12、残り 4 step を overlap にする）。frozen を 0 にすると ramp だけで寄せるが、2026-10-07 の
+    #     Thor の検証では寄りが弱かった（前のチャンクとの差の中央値 0.54 度が ramp_rate 0.3 で 0.31 度・最大は変わらず）。
+    #     既定（rtc_frozen=8）では残りの step をそのまま固定し、その続きを生成させる。
+    #   - async で使う: 前のチャンクのうち、観測の tick 以降の指令を最大 rtc_overlap step 送る。
+    #     frozen は rtc_frozen（推論の遅れの step 数。届いたときには過ぎている分なので更新させない）。
+    # 方式 0（sync・rtc なし）は従来のループをそのまま通る（新しいスケジューラは通らない）。
+    inference_mode: str = "sync"
+    rtc: bool = False
+    rtc_overlap: int = 8
+    rtc_frozen: int = 8
+    rtc_ramp_rate: float = 5.0
 
 
 def _arm_only_deviation(dev_all: Dict[str, float]) -> Dict[str, float]:
@@ -657,6 +699,211 @@ def _connect_stashed_cameras(stash: list, wait_s: float) -> None:
             logging.info(f"カメラ {key} を整列後に開いた")
 
 
+def _first_action_gate(first: Dict[str, float], obs: Dict[str, Any], cfg: EvalConfig) -> None:
+    """B-1 の初回指令の乖離ゲート（従来ループの同じ判定を関数にしたもの・判定の中身は同じ）。"""
+    dev_all = {k: abs(first[k] - float(obs[k])) for k in first if k in obs}
+    dev = _arm_only_deviation(dev_all)
+    worst = max(dev.values()) if dev else 0.0
+    gripper_ref = {k: round(v, 2) for k, v in dev_all.items() if "gripper" in k}
+    logging.info(
+        f"初回指令の現在角からの乖離: 最大 {worst:.2f}（閾値 {cfg.first_action_max_dev}・腕関節のみ）"
+        f" / gripper 参考値 {gripper_ref}"
+    )
+    if worst > cfg.first_action_max_dev:
+        raise SystemExit(
+            f"初回指令が現在角から {worst:.1f} 乖離している（閾値 {cfg.first_action_max_dev}）。\n"
+            "  RELATIVE/ABSOLUTE の解釈違い、または座標フレームのずれが疑われる。\n"
+            f"  内訳: { {k: round(v, 2) for k, v in dev.items()} }\n"
+            "  中止する（実機へは何も送っていない）。"
+        )
+
+
+class _Chunk:
+    """推論 1 回分のチャンク。origin は観測を取った tick（チャンクの 0 番目がこの tick に当たる）。"""
+
+    __slots__ = ("cid", "origin", "actions", "raw", "infer_ms")
+
+    def __init__(self, cid: int, origin: int, actions: list, raw: dict, infer_ms: float):
+        self.cid, self.origin, self.actions, self.raw, self.infer_ms = cid, origin, actions, raw, infer_ms
+
+
+def _pct(values: list, q: float) -> float:
+    return float(np.percentile(np.asarray(values, dtype=np.float64), q)) if values else float("nan")
+
+
+def _run_scheduled(cfg: EvalConfig, robot, runner, policy: "OpenArmAdapter", state_keys: list,
+                   traj_w, save_frame, t_start: float, track: dict) -> None:
+    """sync+rtc / async / async+rtc の 3 方式を 30Hz の tick で回す（2026-10-07）。
+
+    - tick は制御周期の通し番号。指令を送れなかった周期（underrun）も 1 つ進める（時刻がずれないように）。
+      sync の推論待ちの間は進めない（従来どおり腕が止まっている時間で、待ちの後のチャンクの 0 番目が今に当たる）。
+    - いま流すのは cur.actions[tick - cur.origin]。
+    - CAN のバスに触るのは常にこのスレッド（観測の取得も send_action も）。裏のスレッドは推論の呼び出しだけを持つ。
+      ZMQ の REQ ソケットも裏のスレッドだけが使う（最初の 1 回の推論も pool を通す）。
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    is_async = cfg.inference_mode == "async"
+    period = 1.0 / cfg.fps
+    arm_keys = [k for k in state_keys if "gripper" not in k]
+    stats = {"underrun": 0, "late_drop": 0, "switch_idx": [], "jump": [], "infer_ms": [], "rtc_calls": 0}
+    pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="gr00t-infer")
+
+    def fresh_obs() -> Dict[str, Any]:
+        o = robot.get_observation()
+        o["lang"] = cfg.lang_instruction
+        return o
+
+    def infer(obs: Dict[str, Any], options: dict | None):
+        t0 = time.time()
+        actions, raw, _info = policy.get_chunk(obs, options)
+        return actions, raw, (time.time() - t0) * 1000.0
+
+    def rtc_options(cur: _Chunk, idx: int, frozen: int) -> dict | None:
+        """cur の idx 番目以降（= 新しいチャンクの 0 番目以降に当たる指令）を options.rtc にする。"""
+        if not cfg.rtc:
+            return None
+        overlap = min(cfg.rtc_overlap, len(cur.actions) - idx)
+        if overlap < 1:
+            return None
+        prev = {k: np.ascontiguousarray(v[:, idx : idx + overlap, :], dtype=np.float32) for k, v in cur.raw.items()}
+        stats["rtc_calls"] += 1
+        return {"rtc": {"prev_action": prev, "frozen": int(max(0, min(frozen, overlap))),
+                        "ramp_rate": float(cfg.rtc_ramp_rate)}}
+
+    def switch_jump(new_actions: list, k: int, cur: _Chunk, old_idx: int) -> None:
+        if 0 <= old_idx < len(cur.actions):
+            stats["jump"].append(max(abs(new_actions[k][key] - cur.actions[old_idx][key]) for key in arm_keys))
+
+    try:
+        obs = fresh_obs()
+        track["first_obs"] = {k: float(obs[k]) for k in state_keys if k in obs}
+        track["last_obs"] = dict(track["first_obs"])
+        actions, raw, ms = pool.submit(infer, obs, None).result()
+        stats["infer_ms"].append(ms)
+        _first_action_gate(actions[0], obs, cfg)
+        horizon = len(actions)
+        if cfg.rtc and not is_async and cfg.action_horizon >= horizon:
+            raise SystemExit(
+                f"sync で rtc を使うには action_horizon（{cfg.action_horizon}）をチャンク長（{horizon}）より小さくする。"
+                "前のチャンクの残りが RTC の冒頭になる。中止する（実機へは何も送っていない）。"
+            )
+        logging.info(
+            f"方式 = {cfg.inference_mode}{'+rtc' if cfg.rtc else ''}・チャンク長 {horizon} step・"
+            f"{'action_horizon 不使用' if is_async else f'action_horizon {cfg.action_horizon}'}"
+            + (f"・rtc overlap≤{cfg.rtc_overlap} frozen≤{cfg.rtc_frozen} "
+               f"ramp_rate={cfg.rtc_ramp_rate}" if cfg.rtc else "")
+        )
+        cur = _Chunk(0, 0, actions, raw, ms)
+        next_cid = 1
+        pending = None  # (future, origin_tick, cid)
+        tick = 0
+        obs_fresh = True
+
+        while tick < cfg.max_steps and not runner.should_stop:
+            tic = time.time()
+            switched = 0
+
+            # (1) async: 届いた推論を取り込む。観測の tick から k step 過ぎているので k 番目から流す
+            if pending is not None and pending[0].done():
+                fut, origin, cid = pending
+                pending = None
+                new_actions, new_raw, ms = fut.result()
+                stats["infer_ms"].append(ms)
+                k = tick - origin
+                if k < len(new_actions):
+                    switch_jump(new_actions, k, cur, tick - cur.origin)
+                    cur = _Chunk(cid, origin, new_actions, new_raw, ms)
+                    switched = 1
+                    stats["switch_idx"].append(k)
+                    logging.info(f"tick={tick} chunk#{cid} 推論 {ms:.0f}ms・{k} step 過ぎた位置から切り替え")
+                else:
+                    stats["late_drop"] += 1
+                    logging.warning(f"tick={tick} chunk#{cid} は推論 {ms:.0f}ms で遅すぎた（{k} step 過ぎ）→ 捨てる")
+
+            idx = tick - cur.origin
+
+            # (2) sync: action_horizon step 流したら止めて推論を待つ（従来と同じ止まり方。rtc なら残りを冒頭に置く）
+            if not is_async and idx >= cfg.action_horizon:
+                obs = fresh_obs()
+                obs_fresh = True
+                new_actions, new_raw, ms = pool.submit(infer, obs, rtc_options(cur, idx, cfg.rtc_frozen)).result()
+                stats["infer_ms"].append(ms)
+                switch_jump(new_actions, 0, cur, idx)
+                cur = _Chunk(next_cid, tick, new_actions, new_raw, ms)
+                next_cid += 1
+                switched = 1
+                idx = 0
+                logging.info(f"tick={tick} chunk#{cur.cid} 推論 {ms:.0f}ms（sync・腕はこの間止まる）")
+                tic = time.time()  # 推論待ちは周期に含めない（従来と同じ）
+
+            # (3) 観測: async で次の推論を始めるとき、または毎 step の記録のとき
+            need_submit = is_async and pending is None and tick > cur.origin
+            if not obs_fresh and (need_submit or cfg.log_obs_every_step):
+                try:
+                    obs = fresh_obs()
+                    obs_fresh = True
+                except Exception:
+                    if need_submit:
+                        raise
+                    logging.warning("記録用の観測取得に失敗（実行は継続する）", exc_info=False)
+            if need_submit:
+                pending = (pool.submit(infer, obs, rtc_options(cur, idx, cfg.rtc_frozen)), tick, next_cid)
+                next_cid += 1
+            if obs_fresh:
+                track["last_obs"] = {k: float(obs[k]) for k in state_keys if k in obs}
+                if cfg.frame_log_dir and cur.cid % cfg.frame_log_every == 0:
+                    save_frame(obs, tick)
+
+            # (4) 指令。チャンクを使い切っていたら送らずに最後の指令を保つ（underrun）
+            underrun = 0
+            if idx < len(cur.actions):
+                action_dict = cur.actions[idx]
+                if cfg.dry_run:
+                    logging.debug(f"[dry-run] tick={tick} chunk#{cur.cid}[{idx}] {action_dict}")
+                else:
+                    robot.send_action(action_dict)
+            else:
+                action_dict = cur.actions[-1]
+                underrun = 1
+                stats["underrun"] += 1
+
+            if traj_w is not None:
+                traj_w.writerow(
+                    [tick, idx, round(time.time() - t_start, 3)]
+                    + [round(float(obs.get(k, float("nan"))), 4) for k in state_keys]
+                    + [round(float(action_dict[k]), 4) for k in state_keys]
+                    + [cur.cid, cur.origin, switched, round(cur.infer_ms, 1) if switched else "", underrun]
+                )
+
+            tick += 1
+            obs_fresh = False
+            if tick >= cfg.max_steps:
+                logging.info(f"max_steps={cfg.max_steps} に到達 → 正常終了する")
+                break
+            dt = time.time() - tic
+            if dt < period:
+                time.sleep(period - dt)
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
+        n = max(1, tick if "tick" in locals() else 1)
+        logging.info(
+            f"=== 方式 {cfg.inference_mode}{'+rtc' if cfg.rtc else ''} の要約 === "
+            f"推論 {len(stats['infer_ms'])} 回（中央値 {_pct(stats['infer_ms'], 50):.0f}ms・p90 {_pct(stats['infer_ms'], 90):.0f}ms）・"
+            f"rtc 付き {stats['rtc_calls']} 回・underrun {stats['underrun']} tick（{100.0 * stats['underrun'] / n:.1f}%）・"
+            f"遅すぎて捨てた {stats['late_drop']} 回"
+        )
+        if stats["switch_idx"]:
+            logging.info(
+                f"  切り替えた位置 k: 中央値 {_pct(stats['switch_idx'], 50):.0f}・最大 {max(stats['switch_idx'])}"
+            )
+        if stats["jump"]:
+            logging.info(
+                f"  切り替えの瞬間の指令の飛び（腕の関節の最大・度）: 中央値 {_pct(stats['jump'], 50):.2f}・"
+                f"p99 {_pct(stats['jump'], 99):.2f}・最大 {max(stats['jump']):.2f}"
+            )
+
+
 @draccus.wrap()
 def eval(cfg: EvalConfig):
     init_logging()
@@ -716,6 +963,23 @@ def eval(cfg: EvalConfig):
         )
     logging.info(f'lang_instruction = "{cfg.lang_instruction}"（収集時の single_task と一致していること）')
 
+    # 推論の方式（2026-10-07）。実機を繋ぐ前に落とす。
+    if cfg.inference_mode not in ("sync", "async"):
+        raise SystemExit(f"inference_mode は sync か async（指定: {cfg.inference_mode!r}）")
+    if cfg.rtc:
+        if cfg.rtc_overlap < 1 or cfg.rtc_frozen < 0 or cfg.rtc_ramp_rate <= 0:
+            raise SystemExit(
+                f"rtc の値が不正: overlap={cfg.rtc_overlap}（1 以上）frozen={cfg.rtc_frozen}（0 以上）"
+                f" ramp_rate={cfg.rtc_ramp_rate}（正）"
+            )
+        logging.warning(
+            "=== rtc=true: PolicyServer は scripts/g4/gr00t_rtc_server.py で起動していること"
+            "（公式の run_gr00t_server.py は options を捨て、RTC が黙って効かない） ==="
+        )
+    scheduled = cfg.inference_mode == "async" or cfg.rtc
+    logging.info(f"推論の方式 = {cfg.inference_mode}{'+rtc' if cfg.rtc else ''}"
+                 f"（{'新しいスケジューラ' if scheduled else '従来の直列ループ'}）")
+
     if cfg.dry_run:
         logging.warning("=== DRY-RUN モード: 推論のみ実行し、実機へは指令を送らない ===")
 
@@ -774,6 +1038,8 @@ def eval(cfg: EvalConfig):
             ["step", "chunk_i", "t_sec"]
             + [f"present.{k}" for k in keys]
             + [f"cmd.{k}" for k in keys]
+            # 新しいスケジューラのときだけ末尾に足す（step = tick・chunk_i = チャンク内の番号）
+            + (["chunk_id", "chunk_origin", "switched", "infer_ms", "underrun"] if scheduled else [])
         )
         logging.info(f"軌道ログを記録する: {cfg.trajectory_log}")
 
@@ -806,6 +1072,7 @@ def eval(cfg: EvalConfig):
         first_obs = None
         last_obs = None
         chunk_idx = 0
+        track: dict = {}  # 新しいスケジューラが開始・終了の関節角を入れる（finally の要約に使う）
 
         def save_frame(source_obs, at_step: int) -> None:
             """運転時フレームを保存する（学習分布との突き合わせを後から可能にする）。
@@ -829,7 +1096,10 @@ def eval(cfg: EvalConfig):
             except Exception:
                 logging.warning("フレーム保存に失敗（実行は継続する）", exc_info=False)
 
-        while step < cfg.max_steps and not runner.should_stop:
+        if scheduled:
+            _run_scheduled(cfg, robot, runner, policy, state_keys, traj_w, save_frame, t_start, track)
+
+        while not scheduled and step < cfg.max_steps and not runner.should_stop:
             obs = robot.get_observation()
             obs["lang"] = cfg.lang_instruction
             if first_obs is None:
@@ -925,6 +1195,8 @@ def eval(cfg: EvalConfig):
     finally:
         # --- 実際にどれだけ動いたかの要約（目視では差が分からないため必ず数値で残す） ---
         try:
+            if scheduled:
+                first_obs, last_obs = track.get("first_obs"), track.get("last_obs")
             if first_obs and last_obs:
                 logging.info("=== 関節角の変化（開始 → 終了） ===")
                 for k in state_keys:
