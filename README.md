@@ -4,9 +4,11 @@ OpenArm（enactic）のテレオペ・収集を Orboh 運用向けにまとめ�
 
 | リポジトリ | ブランチ | 役割 |
 |---|---|---|
-| **openarm-orboh**（このリポ） | `main` | submodule（`openarm_teleop`/`openarm_description`）・CAN 固定名運用・起動スクリプト一式・シーンプロファイル・IK |
-| [Orboh/lerobot](https://github.com/Orboh/lerobot) | `feat/openarm-remote-teleop` | `openarm_follower`/`openarm_leader`/`openarm_leader_remote` の実装・重力補償・`lerobot-record` 本体。**upstream の huggingface/lerobot ではなくこの fork 限定**（headless キー入力・遠隔テレオペが upstream には無い） |
+| **openarm-orboh**（このリポ） | `dev/openarm-vla` | submodule（`openarm_teleop`/`openarm_description`）・CAN 固定名運用・起動スクリプト一式・シーンプロファイル・IK |
+| [Orboh/lerobot](https://github.com/Orboh/lerobot) | `thor/openarm-bimanual-20261014` | `openarm_follower`/`openarm_leader`/`openarm_leader_remote` の実装・重力補償・`lerobot-record` 本体。**upstream の huggingface/lerobot ではなくこの fork 限定**（headless キー入力・遠隔テレオペが upstream には無い） |
 | [Orboh/XRoboToolkit-Orin-Video-Sender](https://github.com/Orboh/XRoboToolkit-Orin-Video-Sender) | `vector-x86` | PC 接続カメラの映像を PICO へ H.264 配信する sender。**PICO 映像経路を使うマシン（主に Thor）にのみ必要** |
+
+> 2026-10-14: 上の 2 本のブランチは、Thor で動いている両腕・3 眼の収集と GR00T の推論（非同期・RTC を含む）の状態をそのまま上げた現行の組。`scripts/bootstrap.sh` の既定もこの組を指す。旧既定は openarm-orboh `main` と lerobot `feat/openarm-remote-teleop`（両腕収集・推論の変更を含まない）。
 
 | マシン | 役割 | 必要なリポジトリ |
 |---|---|---|

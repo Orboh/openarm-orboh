@@ -32,11 +32,13 @@
 set -u
 
 # ---- 設定ブロック(兄弟リポの URL・ブランチ pin。変更はここ1箇所) --------------
-OPENARM_BRANCH="${OPENARM_BRANCH:-main}"
+# 2026-10-14: 現行の組は openarm-orboh dev/openarm-vla と lerobot thor/openarm-bimanual-20261014
+# （Thor で動いている両腕収集・推論の状態をそのまま上げたもの）。旧既定は main / feat/openarm-remote-teleop。
+OPENARM_BRANCH="${OPENARM_BRANCH:-dev/openarm-vla}"
 LEROBOT_URL="${LEROBOT_URL:-https://github.com/Orboh/lerobot.git}"
 # 2026-09-22: feat/openarm-remote-teleop は両腕対応後の 1 本（bi_openarm の soft_move_to 829f0aa0 と
 #   record の ep0 cue 待ち cf3e7b8a を含む）。単腕・遠隔・両腕収集のどれも同じブランチで動く。
-LEROBOT_BRANCH="${LEROBOT_BRANCH:-feat/openarm-remote-teleop}"
+LEROBOT_BRANCH="${LEROBOT_BRANCH:-thor/openarm-bimanual-20261014}"
 SENDER_URL="${SENDER_URL:-https://github.com/Orboh/XRoboToolkit-Orin-Video-Sender.git}"
 SENDER_BRANCH="${SENDER_BRANCH:-vector-x86}"
 PROJECTS_DIR="${PROJECTS_DIR:-$HOME/projects}"
