@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# openarm_teleop を CMake ビルド（Ubuntu 24.04 / ROS 2 Jazzy の kdl_parser を利用）。リポ相対。
+# openarm_teleop を CMake ビルド（Ubuntu 22.04/ROS Humble・24.04/ROS Jazzy のkdl_parserを利用）。リポ相対。
 set -euo pipefail
 REPO=$(cd "$(dirname "$0")/.." && pwd)
 SRC="$REPO/openarm_teleop"
@@ -10,10 +10,21 @@ BUILD="$SRC/build"
 # conda が混ざると CMake が Python を誤検出する。明示的に外す。
 conda deactivate 2>/dev/null || true
 
+# インストール済みの ROS ディストリを検出（jazzy優先、無ければhumble）。
+ROS_SETUP=""
+for distro in jazzy humble; do
+  if [ -f "/opt/ros/$distro/setup.bash" ]; then
+    ROS_SETUP="/opt/ros/$distro/setup.bash"
+    break
+  fi
+done
+[ -n "$ROS_SETUP" ] || { echo "[ERROR] /opt/ros/{jazzy,humble}/setup.bash が見つからない。先に: bash scripts/install_deps.sh" >&2; exit 1; }
+echo "[build_teleop] using $ROS_SETUP"
+
 # ROS の setup.bash は未定義変数を参照するため nounset を一時解除して source
 set +u
 # shellcheck source=/dev/null
-source /opt/ros/jazzy/setup.bash
+source "$ROS_SETUP"
 set -u
 
 echo "=== CMake configure ==="
