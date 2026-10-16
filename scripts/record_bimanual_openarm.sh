@@ -27,6 +27,7 @@
 #   DISPLAY_DATA=true DISPLAY_IP=<手元PCのIP> DISPLAY_PORT=9876 ... bash scripts/record_bimanual_openarm.sh <tag>   # 手元 PC の rerun へ映像をストリーミング
 #   CONSOLE_FILTER=off bash scripts/record_bimanual_openarm.sh <tag>   # 画面の間引き（scripts/record_console_filter.py・2026-09-22）を切って全行を表示。console.log は常に全行
 #   DMLOG=off bash scripts/record_bimanual_openarm.sh <tag>   # Damiao CAN フィードバックの自動記録（下記）を切る（従来どおりの起動になる）
+#   START_POSE_HOLD=true SAVE_ON_RETURN=true START_COUNTDOWN_S=3 bash scripts/record_bimanual_openarm.sh <tag>   # a の後は両腕を開始姿勢に保持・a の時点で保存・右矢印の後に秒読み（下の「開始姿勢での保持」・2026-10-06）
 #
 # Damiao CAN フィードバックの自動記録（2026-10-05・scripts/lib/dmlog.sh）: lerobot-record の起動直前に
 #   受信専用ロガー（scripts/damiao_feedback_log.py・送信ゼロ）を裏で起こし、終了後に止めて要約を出す。
@@ -485,6 +486,44 @@ if [ -n "$START_POSE_TOL_DEG" ]; then
   )
 fi
 
+# ---- 開始姿勢での保持 / 保存の時点 / 開始の秒読み（2026-10-06・manual のときだけ） ----
+# 既定はどれも無効（従来どおり）。指定したものだけ lerobot に渡すので、この 3 つに未対応の lerobot でも
+# 無効のままなら起動できる。
+#   START_POSE_HOLD=true    a の戻しが検算に通ったら、次の録画の最初のフレームまで両腕を開始姿勢に置く
+#                           （テレオペのループを回さない）。起動直後の 1 本目の前も同じ。leader は重力補償だけで
+#                           手首（J7）を戻す力が無く、放すと垂れて follower が付いていき、机や物に当たって過温で
+#                           ラッチした（2026-10-05・06）。保持中は指令を送らず、1 秒ごとに両腕を読むだけ。
+#   START_POSE_HANDOFF_DEG  保持中の leader が開始姿勢からこれより大きくずれていたら録画を始めない（既定 15）。
+#                           最初のフレームで follower が leader の位置へ 1 歩で動くため。a で戻し直す。
+#   SAVE_ON_RETURN=true     a の戻しが済んだ時点で前のテイクを保存する。右矢印は開始だけになる。
+#                           破棄（左矢印）は a を押す前だけ効く。
+#   START_COUNTDOWN_S=3     右矢印（保存が挟まるときはその終わり）から録画の最初のフレームまで、1 秒ごとに
+#                           1 行と端末のベルで秒読みする。0 で秒読みなし。
+START_POSE_HOLD="${START_POSE_HOLD:-false}"
+SAVE_ON_RETURN="${SAVE_ON_RETURN:-false}"
+START_COUNTDOWN_S="${START_COUNTDOWN_S:-0}"
+START_POSE_HANDOFF_DEG="${START_POSE_HANDOFF_DEG:-15}"
+for _v in START_POSE_HOLD SAVE_ON_RETURN; do
+  case "${!_v}" in
+    true|false) ;;
+    *) echo "[record-bi] $_v must be 'true' or 'false', got '${!_v}'" >&2; exit 1 ;;
+  esac
+done
+case "$START_COUNTDOWN_S" in
+  ''|*[!0-9]*) echo "[record-bi] START_COUNTDOWN_S must be a whole number of seconds, got '$START_COUNTDOWN_S'" >&2; exit 1 ;;
+esac
+if [ "$EPISODE_ADVANCE" = "manual" ]; then
+  if [ "$START_POSE_HOLD" = "true" ]; then
+    GATE_ARGS+=(--start_pose_hold=true --start_pose_handoff_deg="$START_POSE_HANDOFF_DEG")
+  fi
+  if [ "$SAVE_ON_RETURN" = "true" ]; then
+    GATE_ARGS+=(--save_on_return=true)
+  fi
+  if [ "$START_COUNTDOWN_S" != "0" ]; then
+    GATE_ARGS+=(--start_countdown_s="$START_COUNTDOWN_S")
+  fi
+fi
+
 # 設定要約も console.log に入れる(ここで新規作成し、以降は追記)。
 {
   echo "[record-bi] run_dir=$RUN_DIR  scene_tag=$TAG  ts_utc=$TS  host=$(hostname)"
@@ -501,6 +540,11 @@ fi
     echo "[record-bi]   エピソード終了後: a = 両腕を開始姿勢へ戻す -> 環境を整える -> 右矢印 = 次を開始"
     echo "[record-bi]   左矢印 = 直前のテイクを破棄して録り直す / esc = 収集終了"
     echo "[record-bi]   a を押す前に両腕と机から手を引くこと（leader 左→右が各 2.0 秒、続いて follower 両腕 1.5 秒＝約 5.5 秒両腕が自律動作する）"
+    echo "[record-bi]   開始姿勢での保持=$START_POSE_HOLD（受け渡しの上限 ${START_POSE_HANDOFF_DEG}deg）  a の時点で保存=$SAVE_ON_RETURN  開始の秒読み=${START_COUNTDOWN_S}s"
+    if [ "$START_POSE_HOLD" = "true" ]; then
+      echo "[record-bi]   保持: 起動直後と a の後は、次の録画が始まるまで両腕が開始姿勢で止まる（leader は軽い力で保持・放してよい）"
+      echo "[record-bi]   保持が解けるのは録画の最初のフレーム。右矢印を押したら leader の両方のグリップを握って待つ"
+    fi
     if [ -n "$START_POSE_TOL_DEG" ]; then
       echo "[record-bi]   戻し後の検算: ${START_POSE_TOL_DEG}deg  log=$START_POSE_LOG"
     else
@@ -585,6 +629,8 @@ COMMAND_SH="$RUN_DIR/command.sh"
   printf 'GRIPPER_KP=%q ARM_KP=%q \\\n' "$GRIPPER_KP" "$ARM_KP"
   printf 'EPISODE_ADVANCE=%q START_POSE_TOL_DEG=%q START_POSE_MAX_WAIT_S=%q \\\n' \
     "$EPISODE_ADVANCE" "$START_POSE_TOL_DEG" "$START_POSE_MAX_WAIT_S"
+  printf 'START_POSE_HOLD=%q START_POSE_HANDOFF_DEG=%q SAVE_ON_RETURN=%q START_COUNTDOWN_S=%q \\\n' \
+    "$START_POSE_HOLD" "$START_POSE_HANDOFF_DEG" "$SAVE_ON_RETURN" "$START_COUNTDOWN_S"
   printf 'DISPLAY_DATA=%q \\\n' "$DISPLAY_DATA"
   printf 'bash scripts/record_bimanual_openarm.sh %q\n' "$TAG"
 } > "$COMMAND_SH"
