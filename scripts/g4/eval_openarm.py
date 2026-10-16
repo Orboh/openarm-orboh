@@ -204,10 +204,17 @@ class OpenArmAdapter:
         "joint_7.pos",
         "gripper.pos",
     ]
+    # 既定値（フォールバック）。実際に使うカメラ集合は __init__ の camera_keys で
+    # 上書きする——2026-09-11 実測: chest 単眼 bottle モデル用にハードコードされて
+    # いたため、chest+wrist_right の2カメラを要求する tape モデルで
+    # 「Video key 'wrist_right' must be in observation」が発生した
+    # （gr00t/openarm_embodiment/openarm_config.py の modality_keys=["chest","wrist_right"]
+    #  と突き合わせ済み）。`--robot.cameras=...` で実際に接続したカメラ集合と必ず一致させること。
     CAMERA_KEYS = ["chest"]
 
-    def __init__(self, policy_client: PolicyClient):
+    def __init__(self, policy_client: PolicyClient, camera_keys: List[str] | None = None):
         self.policy = policy_client
+        self.CAMERA_KEYS = list(camera_keys) if camera_keys else list(type(self).CAMERA_KEYS)
 
     def obs_to_policy_inputs(self, obs: Dict[str, Any]) -> Dict:
         model_obs = {}
@@ -507,7 +514,10 @@ def eval(cfg: EvalConfig):
         robot.connect()
         log_say("Robot connected", cfg.play_sounds, blocking=True)
 
-        policy = OpenArmAdapter(policy_client)
+        # 実際に接続したカメラ集合（--robot.cameras）をそのまま使う。
+        # ハードコードすると別モデル（カメラ台数の異なる embodiment）で
+        # 「Video key '...' must be in observation」を再発する。
+        policy = OpenArmAdapter(policy_client, camera_keys=list(cfg.robot.cameras.keys()))
         log_say(f'Policy ready: "{cfg.lang_instruction}"', cfg.play_sounds, blocking=True)
 
         step = 0
@@ -524,7 +534,7 @@ def eval(cfg: EvalConfig):
             変換スクリプト（convert_trajlog_to_lerobot.py）はこの対応で画像と行を結ぶ。
             """
             try:
-                img = source_obs.get(OpenArmAdapter.CAMERA_KEYS[0])
+                img = source_obs.get(policy.CAMERA_KEYS[0])
                 if img is not None:
                     os.makedirs(cfg.frame_log_dir, exist_ok=True)
                     np.save(os.path.join(cfg.frame_log_dir, f"frame_{at_step:05d}.npy"), img)

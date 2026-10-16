@@ -1,4 +1,4 @@
-"""GR00T NEW_EMBODIMENT modality config for OpenArm (chest 単眼・8DoF).
+"""GR00T NEW_EMBODIMENT modality config for OpenArm (chest+wrist・8DoF).
 
 launch_finetune.py に --modality_config_path openarm_embodiment/openarm_config.py で渡すと
 importlib で動的ロードされ、トップレベルの register_modality_config が NEW_EMBODIMENT に登録する。
@@ -7,6 +7,9 @@ importlib で動的ロードされ、トップレベルの register_modality_con
 action rep: single_arm=RELATIVE（N1.7 finetune_new_embodiment.md 推奨・汎化有利）/
 gripper=ABSOLUTE（SO100 既定）。収集データは絶対関節角のままで可（delta 化は内部処理）。
 正本: 02VLA/gr00t-openarm-pipeline-design.md §3.3。
+
+2026-09-05: wrist_right（D405手首カメラ）を追加。chest単眼データとwrist込みデータは
+入力次元が異なる別モデルになる（record_pick_place_openarm.sh WRIST=true の設計判断と同じ）。
 """
 
 from gr00t.configs.data.embodiment_configs import register_modality_config
@@ -22,7 +25,7 @@ from gr00t.data.types import (
 openarm_config = {
     "video": ModalityConfig(
         delta_indices=[0],
-        modality_keys=["chest"],
+        modality_keys=["chest", "wrist_right"],
     ),
     "state": ModalityConfig(
         delta_indices=[0],

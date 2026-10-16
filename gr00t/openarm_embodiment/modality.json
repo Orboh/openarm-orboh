@@ -8,7 +8,8 @@
     "gripper": { "start": 7, "end": 8 }
   },
   "video": {
-    "chest": { "original_key": "observation.images.chest" }
+    "chest": { "original_key": "observation.images.chest" },
+    "wrist_right": { "original_key": "observation.images.wrist_right" }
   },
   "annotation": {
     "human.task_description": { "original_key": "task_index" }
