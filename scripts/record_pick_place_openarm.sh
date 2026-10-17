@@ -106,7 +106,7 @@ fi
 # clean across the day's sessions) so all 5 sessions share one value.
 GRAVITY_COMP="${GRAVITY_COMP:-true}"
 GRAVITY_SCALE="${GRAVITY_SCALE:-1.0}"
-GRAVITY_URDF="${GRAVITY_URDF:-$HOME/openarm-orboh/urdf/openarm_v10_bimanual.urdf}"
+GRAVITY_URDF="${GRAVITY_URDF:-$(cd "$(dirname "$0")/.." && pwd)/urdf/openarm_v10_bimanual.urdf}"
 
 # ---- Dataset tunables --------------------------------------------------------
 NUM_EPISODES="${NUM_EPISODES:-50}"
