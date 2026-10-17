@@ -2,6 +2,8 @@
 
 OpenArm（enactic）の teleop を Orboh 運用向けにまとめたリポジトリ。submodule（`openarm_teleop` / `openarm_description`）＋ CAN 固定名運用 ＋ 起動スクリプト一式。
 
+対応OS: Ubuntu 22.04 jammy (ROS 2 Humble) / Ubuntu 24.04 noble (ROS 2 Jazzy)。`install_deps.sh` / `build_teleop.sh` が `/etc/os-release` の `VERSION_CODENAME` から ROS distro を自動判定するため、どちらの環境でも `scripts/setup.sh` がそのまま動く。
+
 ## 設計目標（理想）
 
 **別PCで `git clone` → `scripts/setup.sh` を1回 → PEAK アダプタをどのUSBポートに挿しても leader/follower が逆転しない。** 「ケーブルを正しいポートに挿す」必要をなくすのがゴール。
@@ -90,7 +92,7 @@ near-zero 判定は **「基準零位姿勢」**（各リンクをまっすぐ�
 ## スクリプト一覧
 
 - `setup.sh` … clone 後の一括セットアップ
-- `install_deps.sh` / `build_teleop.sh` / `gen_urdf.sh` … 依存・ビルド・URDF 生成
+- `install_deps.sh` / `build_teleop.sh` / `gen_urdf.sh` … 依存・ビルド・URDF 生成（jammy/Humble・noble/Jazzy は `/etc/os-release` から自動判定）
 - `canup.sh` … channel_id+dev_id で CAN を固定名にして UP（ポート非依存・hotplug競合の保険）＋ `can_check.sh` で実 CAN state を検証し、不健全なら exit 1
 - `can_check.sh` … CAN protocol state（ERROR-ACTIVE/WARNING=健全、BUS-OFF/ERROR-PASSIVE/STOPPED/不在=異常）で健全性を判定。admin UP の嘘を排除。canup が内部で呼ぶ／teleop 後の単独診断も可（read-only）
 - `install_can_rules.sh` … udev 固定名ルール導入（PCごと1回）
