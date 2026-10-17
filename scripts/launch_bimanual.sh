@@ -40,6 +40,16 @@ cleanup() {
   echo; echo "[INFO] 停止: プロセス kill + 全bus disable"
   for p in "${PIDS[@]}"; do kill "$p" 2>/dev/null || true; done
   sleep 0.5
+  for p in "${PIDS[@]}"; do
+    kill -0 "$p" 2>/dev/null || continue
+    echo "[WARN] PID $p 未終了 → SIGKILL"
+    kill -9 "$p" 2>/dev/null || true
+    sleep 0.2
+    if kill -0 "$p" 2>/dev/null; then
+      stat=$(ps -o stat= -p "$p" 2>/dev/null | tr -d ' ')
+      echo "[ERROR] PID $p は SIGKILL でも終了しません(STAT=$stat)。USB-CANアダプタがカーネルドライバ内でuninterruptible sleep(D state)になっている可能性があります。数秒待つか、Followerアダプタを物理的に抜き差ししてください。"
+    fi
+  done
   for ch in can_lead_r can_lead_l can_fol_r can_fol_l; do sudo openarm-can-cli -i "$ch" disable >/dev/null 2>&1 || true; done
   echo "[INFO] 全モータ disable 完了"
 }
