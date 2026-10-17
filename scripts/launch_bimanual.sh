@@ -17,7 +17,11 @@ fi
 echo "=== CAN bring-up + 健全性チェック (canup.sh) ==="
 sudo bash "$REPO/scripts/canup.sh" || { echo "[ERROR] CAN bring-up/健全性チェック失敗。teleop を開始しない。"; exit 1; }
 
-set +u; source /opt/ros/jazzy/setup.bash; set -u
+ROS_SETUP=""
+for distro in jazzy humble; do
+  [ -f "/opt/ros/$distro/setup.bash" ] && { ROS_SETUP="/opt/ros/$distro/setup.bash"; break; }
+done
+set +u; [ -n "$ROS_SETUP" ] && source "$ROS_SETUP"; set -u
 
 cat <<EOF
 
