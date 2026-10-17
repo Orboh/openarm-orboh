@@ -105,6 +105,7 @@ GRIPPER_KP=12 bash scripts/collect_bimanual.sh session s2 [10]   # 続きのセ�
 - `TASK` / `TASK_SLUG` が `TODO` のままだと起動を拒否する。`gate` と `session` は `SCENE=<scenes/のname>` も必須（`scenes/_TEMPLATE.yaml` をコピーし TODO を全部埋める。`python scripts/collect_manifest.py check-scene --scene-path scenes/<name>.yaml` が残り TODO 数を出す。1 本でも録ったあとは書き換えず `-v2` の新ファイルにする）
 - `GRIPPER_KP` は follower gripper（dm4310）の位置 kp。既定 25 のまま硬い物を握り込むとコイルが 100 ℃のラッチに達する（2026-09-21 実測 99 ℃）。積み木など硬い対象は 10〜12 を渡す
 - キー操作は §B と同じ（右矢印 = 次のエピソード / `a` = leader 左→右→follower の順に開始姿勢へ復帰 / 左矢印 = 直前を破棄 / `esc` = 終了）
+- 2026-10-17 追加（**実機未検証・既定は無効**。付けなければ従来どおり）: `START_POSE_HOLD=true`（`a` の後と起動直後に両腕を開始姿勢で保持し、leader を放せる。保持を解く前に leader のずれを読み `START_POSE_HANDOFF_DEG`＝既定 15° を超えていたら始めない）、`SAVE_ON_RETURN=true`（`a` の時点で前のテイクを保存。右矢印は開始だけ）、`START_COUNTDOWN_S=3`（右矢印の後に秒読みとベル）。動機は待機中に leader の手首が垂れて follower の J7 が過温ラッチした件。説明は `scripts/record_bimanual_openarm.sh` の「開始姿勢での保持」、試験手順は Vault `07Member's-free-space/Kento/00-Dev-Log/2026-10-06-record-hold-and-cue-implementation.md` §5
 - 監視: `python scripts/damiao_feedback_log.py can_lead_r can_fol_r can_lead_l can_fol_l --out ~/collections/dmlog-<日時>.csv`（受信のみ・並走可・LOST/BACK と温度ピーク）、赤点滅は `python scripts/damiao_errcheck.py can_fol_r can_fol_l --seconds 3`（`--clear` で過温ラッチ解除）
 - 回収は §B と同じ `bash scripts/pull_run.sh <UTC>-bi-<slug>-<s1…>`（Vector/Mac 側で実行）
 

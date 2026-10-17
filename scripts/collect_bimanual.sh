@@ -17,6 +17,8 @@
 #   VIEWER_KEEP=true bash scripts/collect_bimanual.sh gate   # 起動時にビューアを作り直さない（既定は作り直す＝古い recording が前面に残って映像が止まって見える事故の防止・2026-09-22）
 #   DMLOG=off bash scripts/collect_bimanual.sh gate          # Damiao CAN フィードバックの自動記録を切る（既定は on＝record が裏で受信専用ロガーを起こし、
 #                                                            #   run_dir に dmlog-<tag>.csv・エピソード境界の MARK・要約を残す・2026-10-05。別端末のロガーは不要）
+#   START_POSE_HOLD=true SAVE_ON_RETURN=true START_COUNTDOWN_S=3 bash scripts/collect_bimanual.sh dry   # 2026-10-17 追加・実機未検証・既定は無効: a の後と起動直後に両腕を開始姿勢で保持（leader を放せる）／
+#                                                            #   a の時点で前のテイクを保存（右矢印は開始だけ）／右矢印の後に秒読みとベル。説明は scripts/record_bimanual_openarm.sh の「開始姿勢での保持」
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 ENV_FILE="${ENV_FILE:-$REPO/config/bimanual-collect.env}"

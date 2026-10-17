@@ -58,6 +58,8 @@
 
 > 2026-09-21 追記: 長い env 列を貼らずに済む入口 `scripts/collect_bimanual.sh <dry|gate|session>` を追加した。固定値（TASK・TASK_SLUG・SCENE・OPERATOR・3 カメラのシリアル）は `config/bimanual-collect.env` に 1 回書く。以下の 2.2〜2.3 のコマンドはそれぞれ `bash scripts/collect_bimanual.sh dry`／`bash scripts/collect_bimanual.sh gate` で置き換えられる（左 wrist D405 `409122272149` を既定で含む＝3 眼。学習・推論側は `OPENARM_CAMERAS=chest,wrist_right,wrist_left` を揃える）。
 
+> 2026-10-17 追記（実機未検証・既定は無効）: 待機中に leader の手首（J7）が垂れて follower が机や物に当たり過温ラッチする件（10/6 に 6 回）の対策として、`START_POSE_HOLD=true`（`a` の後と起動直後に両腕を開始姿勢で保持）・`SAVE_ON_RETURN=true`（`a` の時点で前のテイクを保存。右矢印は開始だけ）・`START_COUNTDOWN_S=3`（右矢印の後に秒読みとベル）を `collect_bimanual.sh` の前に付けられるようにした。実機で試すときは `dry` から。問題が出たら env を外せば従来どおり。設計と試験手順は Vault `07Member's-free-space/Kento/00-Dev-Log/2026-10-06-record-hold-and-cue-implementation.md`。
+
 ### 2.1 物理と CAN の前提（毎セッション）
 
 > 2026-09-21 追記（3 眼・モニター・カメラ設定・USB）: (a) 左 wrist D405 `409122272149` を追加し 3 眼が既定（`config/bimanual-collect.env`）。(b) モニター表示は `bash scripts/preview_on_monitor.sh start`（rerun ビューア :9876 常駐＋3 眼プレビュー）。collect は起動時にプレビューを自動停止し、`DISPLAY_DATA=true DISPLAY_IP=127.0.0.1 DISPLAY_PORT=9876` を付ければ同じ画面に record の映像が出る。(c) カメラ設定は起動時に `camera_setup.py` で焼く（D405 露出 28 ms・ゲイン 200／D435i brightness 24。USB 抜き差し・電源断で戻る）。(d) 新ハブの USB 省電力で 3 台同時に約 1.2 秒止まる問題は udev `81-openarm-usb-nosuspend.rules`（Thor 導入済み）で解消。別マシンに繋ぎ替えたら同ルールを入れる。
