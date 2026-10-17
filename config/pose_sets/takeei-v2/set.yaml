@@ -18,7 +18,7 @@ synced_at: 2026-10-06 13:52
 scene: itabashi-takeei-v1
 scene_sha: f542185dfda6
 frozen_at: 2026-10-06 13:53
-datasets: Orboh/bi_openarm_takeei_sort_chest_wristr_wristl_v1_20261006_135309,Orboh/bi_openarm_takeei_sort_chest_wristr_wristl_v1_20261006_135352,Orboh/bi_openarm_takeei_sort_chest_wristr_wristl_v1_20261006_135937,Orboh/bi_openarm_takeei_sort_chest_wristr_wristl_v1_20261006_140857
+datasets: Orboh/bi_openarm_takeei_sort_chest_wristr_wristl_v1_20261006_140857
 collections: 20261006T045253Z-bi-takeei-sort-v1-s1,20261006T045336Z-bi-takeei-sort-v1-s1,20261006T045922Z-bi-takeei-sort-v1-s1,20261006T050843Z-bi-takeei-sort-v1-s1
 model_dir: /home/orbou-thor/models/gr00t-bi-takeei-sort-v1
 model_hf: Orboh/gr00t-bi-openarm-takeei-sort-chest-wristr-wristl-v1
