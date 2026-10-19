@@ -109,6 +109,27 @@ GRIPPER_KP=12 bash scripts/collect_bimanual.sh session s2 [10]   # 続きのセ�
 - 監視: `python scripts/damiao_feedback_log.py can_lead_r can_fol_r can_lead_l can_fol_l --out ~/collections/dmlog-<日時>.csv`（受信のみ・並走可・LOST/BACK と温度ピーク）、赤点滅は `python scripts/damiao_errcheck.py can_fol_r can_fol_l --seconds 3`（`--clear` で過温ラッチ解除）
 - 回収は §B と同じ `bash scripts/pull_run.sh <UTC>-bi-<slug>-<s1…>`（Vector/Mac 側で実行）
 
+### D. バイラテラル(力覚フィードバック)の手応え確認
+
+位置づけ: データ収集(§B/§C のlerobotベース)とは別系統。力覚フィードバックの手応えをその場で確認するための単腕単独テストで、データは記録されない。
+
+前提: `openarm_teleop/build/bilateral_control` が未ビルドなら `bash scripts/build_teleop.sh` でビルドしておく(ROS 2 distro は jazzy/humble を自動検出するよう対応済み)。
+
+```bash
+# 右腕
+bash scripts/launch_bilateral.sh right_arm can_lead_r can_fol_r
+# 左腕
+bash scripts/launch_bilateral.sh left_arm can_lead_l can_fol_l
+```
+
+内部で `canup.sh` の CAN 健全性チェックを呼ぶため、不健全なら起動しない(§CAN 健全性ゲート章と同じ仕組み)。
+
+安全上の注意:
+- Follower の可動域を確保すること。
+- 非常停止ボタンが入ったままだとハンドシェイクが失敗する(実機で発生済み)。
+- Ctrl-C で止まらない場合がある(USB-CAN カーネルドライバの D-state ハング。このリポで既知の事象)。応答しない場合は4本のアーム電源を物理的に切ってから `pkill -9` でプロセスを掃除する。
+- 2026-10-19、右腕・左腕それぞれで実機テスト済み(成功)。
+
 ## 配置規約（契約）
 
 **全マシン `~/projects/<repo>` に固定。lerobot venv は `~/projects/lerobot/.venv` に固定。** `run_teleop_*.sh` / `run_teleop_remote_*.sh` / `run_leader_agent_*.sh` / `calibrate_openarm.sh` / `scripts/g4/run_rollout.sh` など、テレオペ・収集・ロールアウトの実行スクリプト群はこの配置をハードコードして動く（`bootstrap.sh` の `PROJECTS_DIR` はテスト用途専用の上書きで、本番運用ではこの契約を守ること）。
@@ -190,6 +211,7 @@ near-zero 判定は **「基準零位姿勢」**（各リンクをまっすぐ�
 - `install_can_rules.sh` … udev 固定名ルール導入（PCごと1回）
 - `burn_channel_id.sh` … アダプタ役割タグの焼き込み/変更
 - `launch_unilateral.sh` / `launch_bimanual.sh` … ローカル teleop 起動（内部で canup.sh を呼ぶ。CAN が不健全なら teleop を起動せず停止）
+- `launch_bilateral.sh` … 単腕バイラテラル(力覚フィードバック)起動・手応え確認専用（データ収集パイプラインとは独立。内部で canup.sh を呼ぶ）
 - `run_leader_agent_left.sh` / `run_leader_agent_right.sh` … 遠隔テレオペの操作側 PC: リーダー実機を読み follower ホストへ ZMQ 送信（重力補償含む）
 - `run_teleop_remote_left.sh` / `run_teleop_remote_right.sh` … 遠隔テレオペの follower ホスト（Thor）: ネットワーク越しのリーダー角度でフォロワーを追従
 - `start-collection-cameras.sh` … 収集用カメラ分配（Thor）: 実カメラ2台を仮想カメラ3本（PICO用PiP合成 + record用の素の2本）へ分配

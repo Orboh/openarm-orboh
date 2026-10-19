@@ -16,7 +16,7 @@ mkdir -p "$PREFIX/share/ament_index/resource_index/packages"
 ln -s "$DESC" "$PREFIX/share/openarm_description"
 : > "$PREFIX/share/ament_index/resource_index/packages/openarm_description"
 
-set +u; source /opt/ros/jazzy/setup.bash; set -u
+set +u; for _d in jazzy humble; do [ -f "/opt/ros/$_d/setup.bash" ] && { source "/opt/ros/$_d/setup.bash"; break; }; done; set -u
 export AMENT_PREFIX_PATH="$PREFIX:${AMENT_PREFIX_PATH:-}"
 
 mkdir -p "$OUTDIR"

@@ -11,9 +11,9 @@ BUILD="$SRC/build"
 conda deactivate 2>/dev/null || true
 
 # ROS の setup.bash は未定義変数を参照するため nounset を一時解除して source
+# Jazzy(24.04)/Humble(22.04) どちらでも kdl_parser が使えればよいので distro を自動検出
 set +u
-# shellcheck source=/dev/null
-source /opt/ros/jazzy/setup.bash
+for _d in jazzy humble; do [ -f "/opt/ros/$_d/setup.bash" ] && { source "/opt/ros/$_d/setup.bash"; break; }; done
 set -u
 
 echo "=== CMake configure ==="

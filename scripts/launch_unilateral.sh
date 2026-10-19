@@ -20,7 +20,7 @@ BIN="$REPO/openarm_teleop/build/unilateral_control"
 echo "[INFO] CAN bring-up + 健全性チェック (canup.sh)"
 sudo bash "$REPO/scripts/canup.sh" || { echo "[ERROR] CAN bring-up/健全性チェック失敗。teleop を開始しない。"; exit 1; }
 
-set +u; source /opt/ros/jazzy/setup.bash; set -u
+set +u; for _d in jazzy humble; do [ -f "/opt/ros/$_d/setup.bash" ] && { source "/opt/ros/$_d/setup.bash"; break; }; done; set -u
 
 cat <<EOF
 
