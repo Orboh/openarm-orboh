@@ -7,7 +7,10 @@
 # 使い方: bash scripts/run_teleop_remote_left.sh
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 BIN="$HOME/projects/lerobot/.venv/bin/lerobot-teleoperate"
-POSE="$REPO/config/initial_pose_left.yaml"
+# 開始姿勢セット（POSE_SET・未指定なら config/pose_sets/CURRENT）の left.yaml
+source "$REPO/scripts/lib/pose_set.sh"
+pose_set_load current || exit 1
+POSE="$LPOSE"
 POSE_ARGS=()
 [ -f "$POSE" ] && POSE_ARGS+=(--robot.initial_pose_path="$POSE")
 "$BIN" \

@@ -10,7 +10,10 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 URDF="$REPO/urdf/openarm_v10_bimanual.urdf"
 PY="$HOME/projects/lerobot/.venv/bin/python"
 # 開始姿勢: follower 側スクリプトと同じ YAML を使う（両腕が同じ整列先になることが重要）
-POSE="$REPO/config/initial_pose_right.yaml"
+# 開始姿勢セット（POSE_SET・未指定なら config/pose_sets/CURRENT）の right.yaml
+source "$REPO/scripts/lib/pose_set.sh"
+pose_set_load current || exit 1
+POSE="$RPOSE"
 POSE_ARGS=()
 [ -f "$POSE" ] && POSE_ARGS+=(--teleop.initial_pose_path="$POSE")
 "$PY" -m lerobot.teleoperators.openarm_leader_remote.leader_agent \

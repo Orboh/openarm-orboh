@@ -146,10 +146,13 @@ def _calibration_entries(calib_root: Path | None, side: str) -> list[dict]:
     データの意味を決める。ファイルが無い場合も「無かった」ことを記録する
     (存在しない = 恒久零が起動していない可能性の手がかりになる)。
     """
-    specs = [
-        ("robot", "robots", "openarm_follower", f"follower_{side}"),
-        ("teleop", "teleoperators", "openarm_leader", f"leader_{side}"),
-    ]
+    # side="bimanual" は左右 4 ユニットぶん (bi_openarm_* は内部で follower_left/right・
+    # leader_left/right の較正を読むので、記録すべきファイルも単腕と同じ場所にある)。
+    sides = ["left", "right"] if side == "bimanual" else [side]
+    specs = []
+    for s_ in sides:
+        specs.append(("robot", "robots", "openarm_follower", f"follower_{s_}"))
+        specs.append(("teleop", "teleoperators", "openarm_leader", f"leader_{s_}"))
     entries = []
     for role, bucket, type_name, dev_id in specs:
         entry = {"role": role, "type": type_name, "id": dev_id, "path": None, "sha256": None, "mtime_utc": None}
@@ -254,10 +257,18 @@ def cmd_init(args: argparse.Namespace) -> int:
 
     pose_path = Path(args.initial_pose_path) if args.initial_pose_path else None
     initial_pose = _initial_pose_block(pose_path)
+    # bimanual: 右 YAML を従来キー initial_pose に、左 YAML を initial_pose_left に置く
+    # (check-pose-drift は両キーを見る)。
+    pose_left_path = Path(args.initial_pose_path_left) if args.initial_pose_path_left else None
+    initial_pose_left = _initial_pose_block(pose_left_path) if pose_left_path else None
 
     cameras = {"chest": args.cam_serial}
     if args.wrist_serial:
         cameras[f"wrist_{args.side}"] = args.wrist_serial
+    if args.wrist_right_serial:
+        cameras["wrist_right"] = args.wrist_right_serial
+    if args.wrist_left_serial:
+        cameras["wrist_left"] = args.wrist_left_serial
 
     manifest = {
         "schema": SCHEMA,
@@ -282,6 +293,7 @@ def cmd_init(args: argparse.Namespace) -> int:
         },
         "scene": scene,
         "initial_pose": initial_pose,
+        **({"initial_pose_left": initial_pose_left} if initial_pose_left is not None else {}),
         "code": {
             "openarm_orboh": _repo_info(Path(args.repo_root) if args.repo_root else None),
             "lerobot": _repo_info(lerobot_root),
@@ -462,6 +474,15 @@ def cmd_check_drift(args: argparse.Namespace) -> int:
     return 0
 
 
+def _pose_key(path: Path) -> str:
+    """開始姿勢ファイルの照合キー。開始姿勢セット（config/pose_sets/<set>/<side>.yaml・2026-09-30〜）は
+    "<set>/<side>"、それ以前の固定名（config/initial_pose_<side>.yaml）は stem。セットのファイル名は
+    どれも left/right なので、stem だけで照合すると別セットの run と比べてしまう。"""
+    if path.parent.parent.name == "pose_sets":
+        return f"{path.parent.name}/{path.stem}"
+    return path.stem
+
+
 def cmd_check_pose_drift(args: argparse.Namespace) -> int:
     """同じ開始姿勢ファイルで前に録った run と sha が一致するかを見る。
 
@@ -475,7 +496,7 @@ def cmd_check_pose_drift(args: argparse.Namespace) -> int:
     current = _sha256(pose_path)
     if not current:
         return 0
-    name = pose_path.stem
+    name = _pose_key(pose_path)
 
     root = Path(args.collections_dir).expanduser()
     if not root.is_dir():
@@ -486,9 +507,15 @@ def cmd_check_pose_drift(args: argparse.Namespace) -> int:
             m = json.loads(manifest_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
-        pose = m.get("initial_pose") or {}
-        pose_path_recorded = pose.get("path")
-        if not pose_path_recorded or Path(pose_path_recorded).stem != name or not pose.get("sha256"):
+        # 単腕/右は initial_pose、bimanual の左は initial_pose_left に入る。stem で照合する。
+        pose = None
+        for key in ("initial_pose", "initial_pose_left"):
+            cand = m.get(key) or {}
+            cand_path = cand.get("path")
+            if cand_path and _pose_key(Path(cand_path)) == name and cand.get("sha256"):
+                pose = cand
+                break
+        if pose is None:
             continue
         started = (m.get("identity") or {}).get("started_utc") or ""
         if newest is None or started >= newest[0]:
@@ -585,9 +612,12 @@ def main(argv: list[str] | None = None) -> int:
     init.add_argument("--scene", default="")
     init.add_argument("--scene-path", default="")
     init.add_argument("--initial-pose-path", default="")
-    init.add_argument("--side", required=True)
+    init.add_argument("--initial-pose-path-left", default="", help="bimanual: 左腕の開始姿勢 YAML (右は --initial-pose-path)")
+    init.add_argument("--side", required=True, help="left | right | bimanual")
     init.add_argument("--cam-serial", required=True)
-    init.add_argument("--wrist-serial", default="")
+    init.add_argument("--wrist-serial", default="", help="単腕: wrist_<side> の D405 serial")
+    init.add_argument("--wrist-right-serial", default="", help="bimanual: wrist_right の D405 serial")
+    init.add_argument("--wrist-left-serial", default="", help="bimanual: wrist_left の D405 serial")
     init.add_argument("--fps", type=int, required=True)
     init.add_argument("--gravity-scale", type=float, required=True)
     init.add_argument("--repo-id", required=True)

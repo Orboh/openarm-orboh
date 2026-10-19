@@ -9,7 +9,10 @@ URDF="$REPO/urdf/openarm_v10_bimanual.urdf"
 BIN="$HOME/projects/lerobot/.venv/bin/lerobot-teleoperate"
 # 開始姿勢: キャプチャ済み(scripts/capture_initial_pose.sh right)なら整列先に使う。
 # 未キャプチャなら公式既定(肘36°)にフォールバック。
-POSE="$REPO/config/initial_pose_right.yaml"
+# 開始姿勢セット（POSE_SET・未指定なら config/pose_sets/CURRENT）の right.yaml
+source "$REPO/scripts/lib/pose_set.sh"
+pose_set_load current || exit 1
+POSE="$RPOSE"
 POSE_ARGS=()
 [ -f "$POSE" ] && POSE_ARGS+=(--robot.initial_pose_path="$POSE" --teleop.initial_pose_path="$POSE")
 "$BIN" \

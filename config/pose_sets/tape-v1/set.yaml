@@ -1,0 +1,19 @@
+# 開始姿勢セット。scripts/pose_set.py が読み書きする（1 行 1 キー・入れ子なし）。書式と運用は config/pose_sets/README.md
+name: tape-v1
+status: frozen
+frozen_at: 2026-09-30 (既存モデルを後から登録)
+arms: right
+scene: tape-desk-v1
+scene_sha: 47999cb46a5f
+pose_right_sha: 8e6e180752b1
+calib_follower_right: e10d7359dd82
+calib_leader_right: 12a33845e541
+calib_status: reconstructed
+calib_copy: calib/follower_right.json は 2026-08-04 dev-log（2026-08-04-openarm-bump-calibration-verification.md 較正結果）の offset 表から復元（小数 2 桁・元ファイルの sha とは一致しない）。calib/leader_right.json は Vector に残っていた原本。今の較正との差は follower J2 1.79°・J1 0.88°・J5 0.44°・他 0.1° 未満
+code_openarm_orboh: 4eec8a02
+code_lerobot: 927b387b
+datasets: Orboh/openarm_tape_pnp_chest_wrist_v1
+collection: ~/collections/20260905T*-tape-v1-s*
+model_dir: ~/models/gr00t-tape-pnp-v1
+model_hf: unknown
+note: Kota 収集（鹿児島 2026-09-05）。較正は bottle-v2 と同じ 2026-08-04 版で原本が無い（calib/ の復元版を restore-calib で戻せる）。モデルの HF 名は Vault に記録が無い

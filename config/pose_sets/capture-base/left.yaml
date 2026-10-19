@@ -1,0 +1,15 @@
+# OpenArm 撮影の出発姿勢 -- side=left, degrees (logical・follower)。
+# capture_start_pose_bimanual.sh がテレオペを必ずここへ整列させてから撮影を始める（CURRENT に依存させない）。
+# 値は 2026-10-01 板橋の撮影 take1（pose-takeei-20261001.csv）で Kento が腕を下ろして止めた区間
+# t=664.9〜668.1 s の中央値。作業面 約 1080 mm（昇降テーブル表示 108）で当たらないことを実機で確認済み。
+# 電源投入時の垂れた姿勢から近いので経由地は持たない。gripper は較正ゼロに固定。
+align:
+  max_speed_dps: 30.0
+joint_1: 15.37
+joint_2: -1.08
+joint_3: -1.21
+joint_4: 26.43
+joint_5: -0.14
+joint_6: 0.78
+joint_7: 2.97
+gripper: 0.0

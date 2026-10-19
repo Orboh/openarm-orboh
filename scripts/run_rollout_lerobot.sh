@@ -68,6 +68,11 @@ DISPLAY_DATA="${DISPLAY_DATA:-true}"
 # ---- Leader gravity comp (TELEOP=true のとき) ---------------------------------
 GRAVITY_SCALE="${GRAVITY_SCALE:-1.2}"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
+# 開始姿勢は開始姿勢セット（config/pose_sets/<POSE_SET>/）から付ける。推論なので POSE_SET 必須・較正一致必須
+# （モデルは学習データを録った時の開始姿勢・較正と組でしか正しく動かない・2026-09-30）。
+source "$REPO/scripts/lib/pose_set.sh"
+pose_set_load required || exit 1
+pose_set_check rollout || exit 1
 GRAVITY_URDF="${GRAVITY_URDF:-$REPO/urdf/openarm_v10_bimanual.urdf}"
 
 # ---- Binary resolution (teleop venv → conda lerobot env) ----------------------
@@ -90,8 +95,16 @@ if [ "$SIDE" = "bimanual" ]; then
     --robot.id=follower
     --robot.cameras="$CAMERAS"
   )
-  LPOSE="$REPO/config/initial_pose_left.yaml"
-  RPOSE="$REPO/config/initial_pose_right.yaml"
+  # 収集と同じファイルを指すこと。record 側と同じ env 名で差し替える（2026-09-23）。
+  LPOSE="${LEFT_POSE_PATH:-$LPOSE}"
+  RPOSE="${RIGHT_POSE_PATH:-$RPOSE}"
+  for _v in LEFT_POSE_PATH RIGHT_POSE_PATH; do
+    _p="${!_v:-}"
+    if [ -n "$_p" ] && [ ! -f "$_p" ]; then
+      echo "[rollout] $_v に指定した開始姿勢ファイルが無い: $_p" >&2
+      exit 1
+    fi
+  done
   [ -f "$LPOSE" ] && POSE_ARGS+=(--robot.left_arm_config.initial_pose_path="$LPOSE")
   [ -f "$RPOSE" ] && POSE_ARGS+=(--robot.right_arm_config.initial_pose_path="$RPOSE")
   if [ "$TELEOP" = "true" ]; then
@@ -125,7 +138,7 @@ else
     --robot.id="follower_${SIDE}"
     --robot.cameras="$CAMERAS"
   )
-  POSE="$REPO/config/initial_pose_${SIDE}.yaml"
+  if [ "$SIDE" = left ]; then POSE="$LPOSE"; else POSE="$RPOSE"; fi
   [ -f "$POSE" ] && POSE_ARGS+=(--robot.initial_pose_path="$POSE")
   if [ "$TELEOP" = "true" ]; then
     ARGS+=(

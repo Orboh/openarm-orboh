@@ -20,11 +20,62 @@
 
 | ファイル | 役割 |
 |---|---|
+| `openarm_layout.py` | 状態/行動レイアウト（単腕8DoF/両腕16DoF）の正本（env の解釈・データセットからの自動判定・groups の組み立て）。gr00t 非依存 |
 | `openarm_cameras.py` | カメラ構成の正本（env の解釈・データセットからの検出・modality の組み立て）。gr00t 非依存 |
-| `openarm_config.py` | `NEW_EMBODIMENT` として OpenArm を登録する。学習コマンドの `--modality_config_path` に渡す。カメラは `OPENARM_CAMERAS` |
-| `gen_modality_json.py` | 変換済みデータセットの `meta/info.json` からカメラを検出して `meta/modality.json` を書く（手コピーの置き換え） |
-| `check_dataloader.py` | モデル抜きで dataloader が1ステップ読めるかの疎通確認（G1 の PASS 判定）。先にカメラ不一致を検出する |
+| `openarm_config.py` | `NEW_EMBODIMENT` として OpenArm を登録する。学習コマンドの `--modality_config_path` に渡す。カメラは `OPENARM_CAMERAS`、レイアウトは `OPENARM_EMBODIMENT` |
+| `gen_modality_json.py` | 変換済みデータセットの `meta/info.json` からカメラ・レイアウトを検出して `meta/modality.json` を書く（手コピーの置き換え） |
+| `check_dataloader.py` | モデル抜きで dataloader が1ステップ読めるかの疎通確認（G1 の PASS 判定）。先にカメラ・embodiment 不一致を検出する |
 | `modality.json` | chest 単眼のスナップショット（50ep v2 を作ったときのもの）。新規は `gen_modality_json.py` で作る |
+
+## 両腕（bimanual）データを回す
+
+単腕（従来）は `joint_1..7.pos` + `gripper.pos` の8次元。両腕は `OPENARM_EMBODIMENT` で切り替える。
+
+| `OPENARM_EMBODIMENT` | 次元 | state/action names |
+|---|---|---|
+| 未指定（既定） | 8（単腕） | `joint_1.pos`〜`joint_7.pos`, `gripper.pos` |
+| `bimanual` | 16（両腕） | `right_joint_1.pos`〜`right_joint_7.pos`, `right_gripper.pos`, `left_joint_1.pos`〜`left_joint_7.pos`, `left_gripper.pos` |
+
+16次元の契約（index / lerobot feature name / modality key）:
+
+| index | lerobot feature name | modality key |
+|---|---|---|
+| 0–6 | `right_joint_1.pos`〜`right_joint_7.pos` | `right_arm`（0:7） |
+| 7 | `right_gripper.pos` | `right_gripper`（7:8） |
+| 8–14 | `left_joint_1.pos`〜`left_joint_7.pos` | `left_arm`（8:15） |
+| 15 | `left_gripper.pos` | `left_gripper`（15:16） |
+
+この並び（right 先・left 後）の正本は lerobot 側 `BiOpenArmFollower._motors_ft`（bi_openarm_follower.py）と
+`lerobot_record.py`（dataset_features を robot.action_features / observation_features から組む）。
+teleop（`BiOpenArmLeader`）側は left 先の並びだが、dataset 側の並びには影響しない。
+
+**生成手順**（layout は `meta/info.json` の `observation.state` names から自動判定される。
+env を付けると判定結果との一致を検証するだけ）:
+
+```bash
+python openarm_embodiment/gen_modality_json.py ~/.cache/huggingface/lerobot/Orboh/<bimanual_dataset>
+```
+
+**疎通確認**:
+
+```bash
+OPENARM_EMBODIMENT=bimanual uv run --no-sync python openarm_embodiment/check_dataloader.py ~/.cache/huggingface/lerobot/Orboh/<bimanual_dataset>
+```
+
+**学習**（カメラは既定の `chest,wrist_right` のまま。先頭に env を付けるだけ）:
+
+```bash
+OPENARM_EMBODIMENT=bimanual <学習コマンド> --modality_config_path openarm_embodiment/openarm_config.py
+```
+
+**推論**は `scripts/g4/eval_openarm.py` の `--robot.type=bi_openarm_follower` 対応（別途）を参照。
+
+落とし穴:
+- `OPENARM_EMBODIMENT` の付け忘れ（単腕設定のまま16次元データを回す等）は `gen_modality_json.py` /
+  `check_dataloader.py` がどちらも学習前に `[FAIL]` で止める。
+- v3→v2 変換（Isaac-GR00T `scripts/lerobot_conversion/convert_v3_to_v2.py`）は `observation.state` の
+  次元や names に触らず、video も `ffmpeg -c copy` でそのまま切り出す（AV1 のまま）。16次元・複数
+  state キーだからといって変換スクリプト側の追加対応は要らない。
 
 ## 使い方
 

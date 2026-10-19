@@ -20,7 +20,7 @@ startup is what damaged a follower gripper in the field.
 Usage (normally via scripts/capture_initial_pose.sh <left|right>):
   python scripts/capture_initial_pose.py --side right --port can_lead_r \
       --id leader_right --gravity-urdf urdf/openarm_v10_bimanual.urdf \
-      --gravity-side right --out config/initial_pose_right.yaml
+      --gravity-side right --out config/pose_sets/<set>/right.yaml
 """
 
 from __future__ import annotations
