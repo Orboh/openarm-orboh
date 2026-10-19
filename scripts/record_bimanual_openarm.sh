@@ -125,6 +125,25 @@ GRAVITY_COMP="${GRAVITY_COMP:-true}"
 LSCALE="${LSCALE:-1.0}"
 RSCALE="${RSCALE:-1.0}"
 GRAVITY_URDF="${GRAVITY_URDF:-$REPO/urdf/openarm_v10_bimanual.urdf}"
+# ---- Bilateral feedback (leader, opt-in・2026-10-19) ---------------------------
+# 既定 false（従来どおり重力補償のみ）。true にすると lerobot-record の ~30Hz ループ内で
+# follower の現在角へ向けた弱い位置引き込みを追加する（C++ 版 bilateral_step の近似。
+# ~500Hz の専用ループではなく 30Hz のデータ収集ループに相乗りさせているため本物より緩い・
+# もたつく・振動しうる）。ゲインは lerobot 側の config_openarm_leader.py の
+# bilateral_kp/bilateral_kd（未調整の初期値）。実機で弱いところから確認すること。
+BILATERAL_FEEDBACK="${BILATERAL_FEEDBACK:-false}"
+# グリッパーの左右別ゲイン上書き（2026-10-19・空なら lerobot 側の既定値のまま＝CLIに渡さない）。
+# 実機確認で左右の感触差があった（can_fol_l に CAN LOST/BACK の既往あり。個体差の可能性も）。
+# 例: L_BILATERAL_GRIPPER_KP=1.0 L_BILATERAL_GRIPPER_KD=0.06 で左だけ弱める
+L_BILATERAL_GRIPPER_KP="${L_BILATERAL_GRIPPER_KP:-}"
+L_BILATERAL_GRIPPER_KD="${L_BILATERAL_GRIPPER_KD:-}"
+R_BILATERAL_GRIPPER_KP="${R_BILATERAL_GRIPPER_KP:-}"
+R_BILATERAL_GRIPPER_KD="${R_BILATERAL_GRIPPER_KD:-}"
+BILATERAL_GRIPPER_ARGS=()
+[ -n "$L_BILATERAL_GRIPPER_KP" ] && BILATERAL_GRIPPER_ARGS+=(--teleop.left_arm_config.bilateral_gripper_kp="$L_BILATERAL_GRIPPER_KP")
+[ -n "$L_BILATERAL_GRIPPER_KD" ] && BILATERAL_GRIPPER_ARGS+=(--teleop.left_arm_config.bilateral_gripper_kd="$L_BILATERAL_GRIPPER_KD")
+[ -n "$R_BILATERAL_GRIPPER_KP" ] && BILATERAL_GRIPPER_ARGS+=(--teleop.right_arm_config.bilateral_gripper_kp="$R_BILATERAL_GRIPPER_KP")
+[ -n "$R_BILATERAL_GRIPPER_KD" ] && BILATERAL_GRIPPER_ARGS+=(--teleop.right_arm_config.bilateral_gripper_kd="$R_BILATERAL_GRIPPER_KD")
 # follower の起動時の整列に重力補償を足す（2026-10-01・lerobot 7afe1623）。無いと整列の弱いゲインで
 # 重力の分（肩で約 6°）下がって終わり、ループ開始で跳ね上がる。ALIGN_GRAVITY=false で従来どおり。
 ALIGN_GRAVITY="${ALIGN_GRAVITY:-true}"
@@ -497,13 +516,18 @@ fi
 #                           最初のフレームで follower が leader の位置へ 1 歩で動くため。a で戻し直す。
 #   SAVE_ON_RETURN=true     a の戻しが済んだ時点で前のテイクを保存する。右矢印は開始だけになる。
 #                           破棄（左矢印）は a を押す前だけ効く。
+#   SAVE_ON_EPISODE_END=true  2026-10-19追加。そのエピソードの録画が終わった瞬間（右矢印か時間切れ）に
+#                           保存する。a を待たないので SAVE_ON_RETURN よりさらに早い。ハング・クラッシュで
+#                           撮れたテイクを失わないための安全策(このリポでCtrl-Cが効かないD-stateハングが
+#                           既往)。破棄（左矢印）はこれが有効な間は常に効かない（SAVE_ON_RETURNより優先）。
 #   START_COUNTDOWN_S=3     右矢印（保存が挟まるときはその終わり）から録画の最初のフレームまで、1 秒ごとに
 #                           1 行と端末のベルで秒読みする。0 で秒読みなし。
 START_POSE_HOLD="${START_POSE_HOLD:-false}"
 SAVE_ON_RETURN="${SAVE_ON_RETURN:-false}"
+SAVE_ON_EPISODE_END="${SAVE_ON_EPISODE_END:-false}"
 START_COUNTDOWN_S="${START_COUNTDOWN_S:-0}"
 START_POSE_HANDOFF_DEG="${START_POSE_HANDOFF_DEG:-15}"
-for _v in START_POSE_HOLD SAVE_ON_RETURN; do
+for _v in START_POSE_HOLD SAVE_ON_RETURN SAVE_ON_EPISODE_END; do
   case "${!_v}" in
     true|false) ;;
     *) echo "[record-bi] $_v must be 'true' or 'false', got '${!_v}'" >&2; exit 1 ;;
@@ -519,6 +543,9 @@ if [ "$EPISODE_ADVANCE" = "manual" ]; then
   if [ "$SAVE_ON_RETURN" = "true" ]; then
     GATE_ARGS+=(--save_on_return=true)
   fi
+  if [ "$SAVE_ON_EPISODE_END" = "true" ]; then
+    GATE_ARGS+=(--save_on_episode_end=true)
+  fi
   if [ "$START_COUNTDOWN_S" != "0" ]; then
     GATE_ARGS+=(--start_countdown_s="$START_COUNTDOWN_S")
   fi
@@ -532,15 +559,23 @@ fi
   echo "[record-bi] d405: $( [ -n "${D405_GAIN:-}" ] && echo "manual exposure=${D405_EXPOSURE:-28000}us gain=$D405_GAIN（camera_setup.py で焼き済み）" || echo "auto exposure（既定。垂らし姿勢で床を見る向きだけ暗く出る）" )"
   echo "[record-bi] d435: auto exposure, brightness=${D435_BRIGHTNESS:-0}"
   echo "[record-bi] obs=$OBS  repo_id=$REPO_ID  resume=$RESUME  root=${DATASET_ROOT:-<default>}  play_sounds=$PLAY_SOUNDS  episodes(this session)=$NUM_EPISODES  ${CAMERA_W}x${CAMERA_H}@${FPS}fps"
-  echo "[record-bi] gravity_comp=$GRAVITY_COMP L=$LSCALE R=$RSCALE urdf=$GRAVITY_URDF"
+  if [ "$PLAY_SOUNDS" = "true" ]; then
+    echo "[record-bi] 通知音の意味(espeak-ngの日本語読み上げは聞き取れないため2026-10-19に音へ切替):"
+    echo "[record-bi]   camera-shutter = 録画開始 / message = 操作が必要(開始姿勢へ戻す・シーンを整える) / complete = 完了(腕が戻った・録画終了) / dialog-warning = 録り直し / service-logout = 終了"
+  fi
+  echo "[record-bi] gravity_comp=$GRAVITY_COMP L=$LSCALE R=$RSCALE urdf=$GRAVITY_URDF  bilateral_feedback=$BILATERAL_FEEDBACK(近似・30Hzループ・未調整ゲイン)"
   echo "[record-bi] episode_advance=$EPISODE_ADVANCE"
   echo "[record-bi] dmlog=$(_dmlog_enabled && echo "on ifaces=${DMLOG_IFACES:-$FOLLOWER_L $FOLLOWER_R $LEADER_L $LEADER_R}" || echo off)"
   if [ "$EPISODE_ADVANCE" = "manual" ]; then
     echo "[record-bi]   起動時: follower L→R, leader L→R の順に各 2.2 秒ずつ自動整列する(約 9 秒)。connect 前に両腕と机から手を引くこと"
     echo "[record-bi]   エピソード終了後: a = 両腕を開始姿勢へ戻す -> 環境を整える -> 右矢印 = 次を開始"
-    echo "[record-bi]   左矢印 = 直前のテイクを破棄して録り直す / esc = 収集終了"
+    if [ "$SAVE_ON_EPISODE_END" = "true" ]; then
+      echo "[record-bi]   左矢印は効かない（SAVE_ON_EPISODE_END=true: 録画終了の瞬間に保存済み・破棄は不可） / esc = 収集終了"
+    else
+      echo "[record-bi]   左矢印 = 直前のテイクを破棄して録り直す / esc = 収集終了"
+    fi
     echo "[record-bi]   a を押す前に両腕と机から手を引くこと（leader 左→右が各 2.0 秒、続いて follower 両腕 1.5 秒＝約 5.5 秒両腕が自律動作する）"
-    echo "[record-bi]   開始姿勢での保持=$START_POSE_HOLD（受け渡しの上限 ${START_POSE_HANDOFF_DEG}deg）  a の時点で保存=$SAVE_ON_RETURN  開始の秒読み=${START_COUNTDOWN_S}s"
+    echo "[record-bi]   開始姿勢での保持=$START_POSE_HOLD（受け渡しの上限 ${START_POSE_HANDOFF_DEG}deg）  a の時点で保存=$SAVE_ON_RETURN  録画終了時に保存=$SAVE_ON_EPISODE_END  開始の秒読み=${START_COUNTDOWN_S}s"
     if [ "$START_POSE_HOLD" = "true" ]; then
       echo "[record-bi]   保持: 起動直後と a の後は、次の録画が始まるまで両腕が開始姿勢で止まる（leader は軽い力で保持・放してよい）"
       echo "[record-bi]   保持が解けるのは録画の最初のフレーム。右矢印を押したら leader の両方のグリップを握って待つ"
@@ -626,11 +661,14 @@ COMMAND_SH="$RUN_DIR/command.sh"
   printf 'TASK=%q \\\n' "$TASK"
   printf 'TASK_SLUG=%q \\\n' "$TASK_SLUG"
   printf 'GRAVITY_COMP=%q LSCALE=%q RSCALE=%q GRAVITY_URDF=%q ALIGN_GRAVITY=%q \\\n' "$GRAVITY_COMP" "$LSCALE" "$RSCALE" "$GRAVITY_URDF" "$ALIGN_GRAVITY"
+  printf 'BILATERAL_FEEDBACK=%q \\\n' "$BILATERAL_FEEDBACK"
+  printf 'L_BILATERAL_GRIPPER_KP=%q L_BILATERAL_GRIPPER_KD=%q R_BILATERAL_GRIPPER_KP=%q R_BILATERAL_GRIPPER_KD=%q \\\n' \
+    "$L_BILATERAL_GRIPPER_KP" "$L_BILATERAL_GRIPPER_KD" "$R_BILATERAL_GRIPPER_KP" "$R_BILATERAL_GRIPPER_KD"
   printf 'GRIPPER_KP=%q ARM_KP=%q \\\n' "$GRIPPER_KP" "$ARM_KP"
   printf 'EPISODE_ADVANCE=%q START_POSE_TOL_DEG=%q START_POSE_MAX_WAIT_S=%q \\\n' \
     "$EPISODE_ADVANCE" "$START_POSE_TOL_DEG" "$START_POSE_MAX_WAIT_S"
-  printf 'START_POSE_HOLD=%q START_POSE_HANDOFF_DEG=%q SAVE_ON_RETURN=%q START_COUNTDOWN_S=%q \\\n' \
-    "$START_POSE_HOLD" "$START_POSE_HANDOFF_DEG" "$SAVE_ON_RETURN" "$START_COUNTDOWN_S"
+  printf 'START_POSE_HOLD=%q START_POSE_HANDOFF_DEG=%q SAVE_ON_RETURN=%q SAVE_ON_EPISODE_END=%q START_COUNTDOWN_S=%q \\\n' \
+    "$START_POSE_HOLD" "$START_POSE_HANDOFF_DEG" "$SAVE_ON_RETURN" "$SAVE_ON_EPISODE_END" "$START_COUNTDOWN_S"
   printf 'DISPLAY_DATA=%q \\\n' "$DISPLAY_DATA"
   printf 'bash scripts/record_bimanual_openarm.sh %q\n' "$TAG"
 } > "$COMMAND_SH"
@@ -671,6 +709,8 @@ set +e
   --teleop.id=leader \
   --teleop.left_arm_config.gravity_compensation="$GRAVITY_COMP" --teleop.left_arm_config.gravity_urdf_path="$GRAVITY_URDF" --teleop.left_arm_config.gravity_side=left --teleop.left_arm_config.gravity_scale="$LSCALE" \
   --teleop.right_arm_config.gravity_compensation="$GRAVITY_COMP" --teleop.right_arm_config.gravity_urdf_path="$GRAVITY_URDF" --teleop.right_arm_config.gravity_side=right --teleop.right_arm_config.gravity_scale="$RSCALE" \
+  --teleop.left_arm_config.bilateral_feedback="$BILATERAL_FEEDBACK" --teleop.right_arm_config.bilateral_feedback="$BILATERAL_FEEDBACK" \
+  ${BILATERAL_GRIPPER_ARGS[@]+"${BILATERAL_GRIPPER_ARGS[@]}"} \
   --display_data="$DISPLAY_DATA" \
   ${DISPLAY_ARGS[@]+"${DISPLAY_ARGS[@]}"} \
   --resume="$RESUME" \
