@@ -195,10 +195,14 @@ def main() -> int:
     if args.quiet:  # 書き出し専用: 抽出の表示（確認で一度見たもの）を出さず、書き出しの行だけ出す
         import builtins
         _print = builtins.print
-        def print(*a, **k):  # noqa: A001
+
+        def _quiet_print(*a, **k):
             if k.get("file") is sys.stderr or str(a[0] if a else "").startswith(("[dwell] 書き出し", "[dwell] 使うなら", "[dwell] 既に")):
                 _print(*a, **k)
-        globals()["print"] = print
+        # グローバルの print だけ差し替える。main() のローカル名として `print` を
+        # 束縛すると、quiet=False の経路でも print が未定義のローカル変数扱いに
+        # なり UnboundLocalError になる（Python のスコープ規則）。
+        globals()["print"] = _quiet_print
     ts, q = load(args.csv.expanduser(), args.unit, sides)
     if args.since is not None:
         keep = [i for i, t in enumerate(ts) if t >= args.since]
