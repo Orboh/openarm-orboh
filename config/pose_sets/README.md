@@ -55,5 +55,5 @@
 | bi-blockstack-v1 | frozen | gr00t-bi-blockstack-v1 | itabashi-blockstack-v1 | 原本 4 本（2026-09-21〜22 bump-to-stop） |
 | bi-blockstack-leftarm-v1 | frozen | gr00t-bi-blockstack-leftarm-v1 | itabashi-blockstack-leftarm-rightcam-v1 | 同上。右腕はカメラ役で経由地つき |
 | capture-base | frozen | なし（撮影の出発姿勢専用・収集と推論には使わない） | なし | 照合しない（テレオペは警告のみ） |
-| takeei-v1 | draft（Thor の作業ツリーのみ・未 commit） | 未学習 | 未設定 | 2026-10-01 撮影・肘 J4 が可動域の端の 1° 手前で不採用 |
+| takeei-v1 | draft（2026-10-19 に git へ保全） | 未学習 | 未設定 | 2026-10-01 撮影・肘 J4 が可動域の端の 1° 手前で不採用 |
 | takeei-v2 | frozen・CURRENT（2026-10-06 13:53） | gr00t-bi-takeei-sort-v1（16 step）・gr00t-bi-takeei-sort-h32-v1（32 step） | itabashi-takeei-v1 | 2026-10-02 撮影・作業面 108・経由地 左右 10 点。データセットは 50 本の `..._20261006_140857` |
