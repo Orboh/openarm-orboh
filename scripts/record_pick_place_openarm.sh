@@ -41,15 +41,17 @@ set -euo pipefail
 # ---- Arm pair (channel_id fixed CAN names -- USB/PC independent) -------------
 SIDE="${SIDE:-left}"                        # left | right
 case "$SIDE" in
-  left)  FOLLOWER_PORT=can_fol_l; LEADER_PORT=can_lead_l ;;
-  right) FOLLOWER_PORT=can_fol_r; LEADER_PORT=can_lead_r ;;
+  left)  FOLLOWER_PORT=can_fol_l; LEADER_PORT=can_lead_l; DEFAULT_WRIST_SERIAL=409122272149 ;;
+  right) FOLLOWER_PORT=can_fol_r; LEADER_PORT=can_lead_r; DEFAULT_WRIST_SERIAL=352122273417 ;;
   *) echo "[record] SIDE must be 'left' or 'right', got '$SIDE'" >&2; exit 1 ;;
 esac
 
 # ---- Cameras: D435i (chest) always; optional D405 wrist (WRIST=true) ----------
 CAM_SERIAL="${CAM_SERIAL:-344422070898}"      # D435i (chest)
 WRIST="${WRIST:-false}"                       # true => add D405 wrist cam (different model! separate dataset)
-WRIST_SERIAL="${WRIST_SERIAL:-260322272302}"  # D405 (wrist) -- verified streaming 2026-06-19
+# D405 wrist cams -- confirmed 2026-10-19 via lerobot-find-cameras (left = has E-stop button
+# in frame): left=409122272149 / right=352122273417. Defaults picked per $SIDE above.
+WRIST_SERIAL="${WRIST_SERIAL:-$DEFAULT_WRIST_SERIAL}"
 CAMERA_W="${CAMERA_W:-640}"
 CAMERA_H="${CAMERA_H:-480}"
 FPS="${FPS:-30}"                            # = dataset.fps AND teleop loop rate (record forces them equal); camera-capped (~<=60 @640x480 RGB). FPS=60 reduces follower jitter
