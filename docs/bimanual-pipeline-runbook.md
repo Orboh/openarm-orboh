@@ -4,6 +4,8 @@
 
 > 2026-09-30: 開始姿勢 YAML は `config/initial_pose_{left,right}.yaml` から開始姿勢セット `config/pose_sets/<set>/{left,right}.yaml` へ移した（`scripts/lib/pose_set.sh`）。本書の旧パスは 09-21 当時の記録。
 
+> 2026-10-05: 収集設定 env はタスクごとに `config/bimanual-collect.<タスク名>.env` を作り、収集を流す端末ごとに最初に 1 回 `export ENV_FILE=...` で指定する。元の `config/bimanual-collect.env` は TODO のひな形のまま書き換えない（指定を忘れると TASK が TODO で止まる）。手順の正本は Vault の `itabashi-bimanual-collection-manual` §2 の 1。推論側（`scripts/g4/rollout_bi_*.sh`）は env を読まないので、タスクごとに直す値は本書 §6.1 にまとめた。新タスクを一から立ち上げる順路は Vault の `gr00t-new-task-manual`、各段に入る前の確認一覧は `new-task-startup-checklist`（どちらも `02VLA/` 配下）。
+
 起案日 2026-09-21。対象は Vector で編集した feat/bimanual-collection（openarm-orboh）と feat/openarm-remote-teleop（lerobot fork・BiOpenArmLeader.soft_move_to 追加）の実機投入。両腕経路は全段で実機未検証なので、各段の「初回だけやる検証」を飛ばさない。以下、絶対パスは Thor と EC2 のものも `~` を各マシンの HOME として読む。
 
 ---
@@ -56,7 +58,7 @@
 
 ## 2. 収集の起動（Thor・`ssh -t thor` の素の端末で。`ssh -X` にしない）
 
-> 2026-09-21 追記: 長い env 列を貼らずに済む入口 `scripts/collect_bimanual.sh <dry|gate|session>` を追加した。固定値（TASK・TASK_SLUG・SCENE・OPERATOR・3 カメラのシリアル）は `config/bimanual-collect.env` に 1 回書く。以下の 2.2〜2.3 のコマンドはそれぞれ `bash scripts/collect_bimanual.sh dry`／`bash scripts/collect_bimanual.sh gate` で置き換えられる（左 wrist D405 `409122272149` を既定で含む＝3 眼。学習・推論側は `OPENARM_CAMERAS=chest,wrist_right,wrist_left` を揃える）。
+> 2026-09-21 追記: 長い env 列を貼らずに済む入口 `scripts/collect_bimanual.sh <dry|gate|session>` を追加した。固定値（TASK・TASK_SLUG・SCENE・OPERATOR・3 カメラのシリアル）は env ファイルに書く。**（2026-10-05 訂正: 当初は `config/bimanual-collect.env` に 1 回書くとしたが、現行はタスクごとに `config/bimanual-collect.<タスク名>.env` を作って `export ENV_FILE=...` で指定する。ひな形は書き換えない。上の冒頭注記を参照）** 以下の 2.2〜2.3 のコマンドはそれぞれ `bash scripts/collect_bimanual.sh dry`／`bash scripts/collect_bimanual.sh gate` で置き換えられる（左 wrist D405 `409122272149` を既定で含む＝3 眼。学習・推論側は `OPENARM_CAMERAS=chest,wrist_right,wrist_left` を揃える）。
 
 > 2026-10-17 追記（実機未検証・既定は無効）: 待機中に leader の手首（J7）が垂れて follower が机や物に当たり過温ラッチする件（10/6 に 6 回）の対策として、`START_POSE_HOLD=true`（`a` の後と起動直後に両腕を開始姿勢で保持）・`SAVE_ON_RETURN=true`（`a` の時点で前のテイクを保存。右矢印は開始だけ）・`START_COUNTDOWN_S=3`（右矢印の後に秒読みとベル）を `collect_bimanual.sh` の前に付けられるようにした。実機で試すときは `dry` から。問題が出たら env を外せば従来どおり。設計と試験手順は Vault `07Member's-free-space/Kento/00-Dev-Log/2026-10-06-record-hold-and-cue-implementation.md`。
 
@@ -72,6 +74,8 @@
 5. 板橋の机高さ・かご位置は 09-19 の devlog に「アーム机約 710・昇降表示 89・相対 +180mm」の実測があるので出発点にする。
 
 ### 2.2 dry run（2 本・条件を残さない）
+
+> 2026-10-05 注記: 以下の素の `record_bimanual_openarm.sh` 列は 09-21 時点の記録で、現行の入口は `bash scripts/collect_bimanual.sh dry`（`ENV_FILE` を export 済みの端末で）。値の例（okra・`itabashi-desk-v1`）も当時のもので、新タスクのひな形にしない。点検項目の見方は有効。
 
 ```
 source ~/projects/lerobot/.venv/bin/activate
@@ -96,6 +100,8 @@ env -u DISPLAY -u WAYLAND_DISPLAY \
 13. test データセットは `~/.cache/huggingface/lerobot/Orboh/` から消してよい（捨て名運用）。
 
 ### 2.3 受入ゲート（本番 10 本を 1 セッション録って止める）
+
+> 2026-10-05 注記: 以下の素の `record_bimanual_openarm.sh` 列は 09-21 時点の記録で、現行の入口は `GRIPPER_KP=12 bash scripts/collect_bimanual.sh gate`（続きのセッションは `session s2` 等。`RESUME=true` のとき `REPO_ID` と `DATASET_ROOT` は gate が表示した stamp 付きの実名で渡す）。起動手順の正本は Vault の `itabashi-bimanual-collection-manual` §2。受入で見る項目 14〜21 は有効。
 
 ```
 env -u DISPLAY -u WAYLAND_DISPLAY \
@@ -247,10 +253,45 @@ env -u DISPLAY -u WAYLAND_DISPLAY \
      --policy_host=127.0.0.1 --policy_port=5555 \
      --dry_run=true --fps=30 --max_steps=64 --action_horizon=16 --log_obs_every_step=true
    ```
-   要点: `max_relative_target` は **腕ごとに 8 キーの dict**（top-level は BiOpenArmFollowerConfig に無い・7 キーや None は起動時 SystemExit）。初期値は bottle v2 デモの 1 step 変化量 P99.9 実測（joint1/2=2.5, joint3=3.0, joint4/5/7=5.0, joint6=4.0, gripper=15.0）を左右同値で置き、両腕 okra デモの `data/*.parquet` から同じ P99.9 を取り直して置き換える（スカラー一律 1.0 はデモ実速度の 1/4〜1/12 で軌道を壊した）。この値は MIT 位置制御では復元トルク上限も兼ねるので、小さすぎると hold が重力で垂れる。`--robot.cameras` の挿入順（chest, wrist_right）が video キー順になるので modality.json と同じ順で書く。`--lang_instruction` は既定文がボトル用なので必ず渡す（09-19 に 4 本とも既定文で回した穴）。開始姿勢 YAML は run_rollout.sh が左右それぞれ `config/initial_pose_{left,right}.yaml` を自動付与し `command.sh` に残す。`--log_obs_every_step` は明示必須（無指定は exit 2）。
+   要点: `max_relative_target` は **腕ごとに 8 キーの dict**（top-level は BiOpenArmFollowerConfig に無い・7 キーや None は起動時 SystemExit）。初期値は bottle v2 デモの 1 step 変化量 P99.9 実測（joint1/2=2.5, joint3=3.0, joint4/5/7=5.0, joint6=4.0, gripper=15.0）を左右同値で置き、両腕 okra デモの `data/*.parquet` から同じ P99.9 を取り直して置き換える（スカラー一律 1.0 はデモ実速度の 1/4〜1/12 で軌道を壊した）。この値は MIT 位置制御では復元トルク上限も兼ねるので、小さすぎると hold が重力で垂れる。`--robot.cameras` の挿入順（chest, wrist_right）が video キー順になるので modality.json と同じ順で書く。`--lang_instruction` は既定文がボトル用なので必ず渡す（09-19 に 4 本とも既定文で回した穴）。開始姿勢 YAML は run_rollout.sh が `POSE_SET`（必須）のセット `config/pose_sets/<set>/{left,right}.yaml` から左右それぞれ自動付与し `command.sh` に残す（2026-09-30 以降。旧 `config/initial_pose_{left,right}.yaml` ではない。`--robot.*initial_pose_path` の直接指定は exit 2）。タスクごとに直す値は §6.1。`--log_obs_every_step` は明示必須（無指定は exit 2）。
 7. dry run で見るもの: (a) `layout = bimanual（state 16 次元）/ camera_keys = ['chest','wrist_right']` のログ、(b) 初回指令の乖離が腕 14 関節で閾値 20 未満（gripper 2 本は除外され参考値でログ）、(c) chunk 内 dt が 1/30 秒に収まる、(d) **腕が動いている最中に Ctrl-C を 1 回**押して、`left ... torque disable 成功` と `right ... torque disable 成功` が bus ごとに出て両腕が脱力する。Ctrl-C は 1 回だけ（2 回目は後片付け自体を中断する）。Damiao の error latch で脱力しなければ PSU OFF → 10 秒 → ON。
 8. 実駆動: `--dry_run=false --max_steps=600` に変え、タグを `bi-okra-cellN-1` 等に。1 本ごとに `~/rollouts/<UTC>-<tag>/` の `notes.md` に目視所見と判定（L1〜L4）を書き、rollout 台帳（`rollout-log-*.md`）に 1 エントリ。J3 限界張り付きが出たら止める（09-19 の安全所見）。
 9. 回収: Mac または Vector から `pull_rollout.sh <UTC>-<tag>`（軽量メタ）、生データは `convert_trajlog_to_lerobot.py` で `Orboh/bi_openarm_okra_rollouts_v1` へ。
+
+### 6.1 タスクごとに推論側で直す値（2026-10-05 追加）
+
+推論スクリプト（`scripts/g4/rollout_bi_leftarm.sh` など）は env を読まない。新タスクでは、leftarm 用の値を写したままにせず、次の 6 項目を推論側で直す。行番号は `rollout_bi_leftarm.sh` の 2026-10-05 時点のもの。
+
+1. `POSE_SET`（L20 付近）: 収集と同じ開始姿勢セット。
+2. `LANG_TEXT`（L24 付近）: env の `TASK` と一字一句同じ文。
+3. `OPENARM_CAMERAS`（L26 付近）と `CAMS`（L54 付近）: 学習と同じカメラ構成・同じ順（modality.json の順）。
+4. `KP`（L53 付近）: 収集の `GRIPPER_KP=12` と同じ gripper 12（`[240,240,240,240,24,31,25,12]`）。
+5. `max_relative_target`（L69〜70 付近・腕ごとの 8 キー dict）: そのタスクのデータの 1 step 変化量の P99.9（関節別・腕別）。leftarm の値は別タスクのデータ由来で流用しない。小さすぎると hold が重力で垂れる（§6 の 6）。
+6. `--max_steps`（L73 付近・現行 1500）: 収集データのエピソード長の P75。GR00T は完了を出力できず（VLA 課題 VI-002）、推論は `max_steps` か Ctrl-C でしか止まらない。成功時は人が Ctrl-C する（success-stop）。
+
+P75 と P99.9 の算出スクリプトは repo に無い。変換済みデータから手で算出し、式と値を試走表（ロールアウト台帳）かスクリプトのコメントに残す。
+
+`run_rollout.sh` が止める 3 つの guard:
+- `--lang_instruction` がセットの `lang` と違えば exit 2。
+- `POSE_SET` 未指定、または `MODEL` がセットのモデルと違えば exit 2（別モデルを回すときだけ `ALLOW_MODEL_MISMATCH=true`）。
+- `--log_obs_every_step` を明示しないと exit 2。
+
+env の `ALIGN_GRAVITY` とセットの `ALIGN` の一致は guard が無く、止まらない。人が見る。
+
+学習後にモデルとタスク文をセットへ登録する（未登録だと rollout は exit 2）:
+
+```
+python3 scripts/pose_set.py set-model <set> --model-dir ~/models/<名> --model-hf <repo> --lang "<収集の TASK と同じ文>"
+```
+
+### 6.2 収集前の点検（タスクが変わっても毎回）
+
+1. `rs-enumerate-devices` の Usb Type Descriptor が 3.2 であること（2.1 なら USB2 にしか繋がっていない。2026-10-05 は右 wrist D405 のケーブル不良）。
+2. `sudo dmesg | grep 'usb 2-1: USB disconnect'` の件数を見る（カメラ用ハブの USB-C 端子で USB3 だけ切れる事象は 20 分で 14 回出た。挿し直しで直る）。
+3. `camera_preview.py --no-viewer --frames 150` で各カメラが約 30fps（数字が下がり続けたら停止）。
+4. `python scripts/openarm_motorcheck.py` の読みが前回から大きく変わった関節は、起動前に実物を見る（右 follower J5 が手でねじれて 89.86°だった）。36° の倍数を指すなら巻き数ずれの恐れで起動しない。
+
+motorcheck の読みの確認は Vault の `itabashi-bimanual-collection-manual` §1 の 2、USB3（Usb Type 3.2）・dmesg・fps 試験の見分け方は `thor-camera-monitor-current` §1（2026-10-05 訂正）が正本。itabashi マニュアル §1 への USB・fps の手順追記は未了。
 
 根拠: `scripts/g4/run_rollout.sh` ヘッダと本文（両腕例・自動付与・layout 自己矛盾ガード・`--log_obs_every_step` guard）、`scripts/g4/eval_openarm.py` docstring と `_check_max_relative_target`・`SafeRunner._buses`・`_arm_only_deviation`（unit D 報告）、pipeline-design §6.6（PolicyServer 起動・二段ゲート・Ctrl-C 検証・乖離ゲート）・§5.-2（HF → Thor 10MB/s・embodiment の突合）、devlog 2026-08-24（続）（dict 化の根拠と P99.9 値）、memory `project_openarm-jev-decision-layer` gotcha（max_relative_target と復元トルク）、devlog 2026-09-18〜19（`--lang_instruction` 未指定の穴・J3 張り付き）。
 
@@ -258,7 +299,7 @@ env -u DISPLAY -u WAYLAND_DISPLAY \
 
 ## 7. 未確定事項（人が決める）
 
-1. **タスク定義**: 両腕オクラの言語指示文（`TASK`）と役割分担（右で把持・左でかご保持か、両腕交互か）。文字列は収集・`--lang_instruction`・データセット名の `TASK_SLUG` の 3 か所で一致させる必要があるので先に固める。エピソード尺（`EPISODE_TIME_S`。両腕は 20 秒で足りない可能性・打ち切り到達を避ける値）。
+1. **タスク定義**: 両腕オクラの言語指示文（`TASK`）と役割分担（右で把持・左でかご保持か、両腕交互か）。文字列は env の `TASK`・開始姿勢セットの `lang`（`pose_set.py set-model --lang`）・推論の `--lang_instruction` の 3 か所で一字一句一致させる必要があるので先に固める（`TASK_SLUG` はデータセット名用で文字列の一致対象ではない。2026-10-05 更新）。エピソード尺（`EPISODE_TIME_S`。両腕は 20 秒で足りない可能性・打ち切り到達を避ける値）。
 2. **板橋シーン YAML の実測**: `scenes/itabashi-desk-v1.yaml`（名前は仮）の机高さ・昇降・かご位置・散らし範囲・照明。Kota の `tape-desk-v1.yaml` は TODO 40 件のまま未コミットなので、新規に作って全 TODO を埋める。緑格子かご（TBR 所有・持ち出せず）の代替容器をどうするか（09-19 の実測でリリースは容器の見た目に依存）。
 3. **Kota の 9/5 FT 条件**（EC2 インスタンス型・step 数・費用・wrist 版 embodiment の内容）: 未回答。2 カメラ FT の唯一の先行実績なので、§5-4 の step/batch の目安を実績で置き換えられる。併せて Thor の未コミット（`modality.json` wrist 版・`initial_pose_right.yaml` 9/5 版・lerobot `lerobot_record.py`）の意図確認と、左右 YAML の対コミット。
 4. **左 wrist カメラ**: 今回は無し（端子無し）。追加時は `WRIST_LEFT=true WRIST_LEFT_SERIAL=...` で obs が `chest_wristr_wristl` になり別データセット・別モデル系統になる。
