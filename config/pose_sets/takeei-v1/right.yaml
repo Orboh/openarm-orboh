@@ -1,0 +1,93 @@
+# OpenArm 開始姿勢 -- side=right, degrees (logical・follower)。
+# 2026-10-01 12:51 scripts/pose_from_dwell.py で生成: pose-takeei-20261001.csv の一番長い静止区間 t=679.7〜692.0s（12.2s）の中央値。
+# waypoints = その直前の経路（t=668.1〜679.7s）を RDP で間引いた点（直線と実経路のずれ ≤ 5.0°）。
+# 整列は現在姿勢から waypoints を順にたどり、最後にこの開始姿勢へ入る（関節空間の直線補間・衝突判定なし）。
+# gripper は較正ゼロに固定（起動時の非ゼロ把持指令で follower gripper を壊した事故による約束）。
+align:
+  max_speed_dps: 40.0
+waypoints:
+  - joint_1: -7.54
+    joint_2: -0.67
+    joint_3: -0.14
+    joint_4: 23.10
+    joint_5: -2.08
+    joint_6: -0.86
+    joint_7: -9.12
+  - joint_1: -8.13
+    joint_2: -0.69
+    joint_3: -0.23
+    joint_4: 23.12
+    joint_5: -1.71
+    joint_6: 1.24
+    joint_7: -12.62
+  - joint_1: -14.01
+    joint_2: -0.69
+    joint_3: -0.23
+    joint_4: 23.28
+    joint_5: -4.47
+    joint_6: -1.07
+    joint_7: -0.66
+  - joint_1: -42.34
+    joint_2: -7.27
+    joint_3: -0.25
+    joint_4: 24.39
+    joint_5: -4.22
+    joint_6: -34.08
+    joint_7: 80.27
+  - joint_1: -51.91
+    joint_2: -7.03
+    joint_3: -0.23
+    joint_4: 32.55
+    joint_5: -2.41
+    joint_6: -29.42
+    joint_7: 87.73
+  - joint_1: -71.63
+    joint_2: -1.21
+    joint_3: -0.07
+    joint_4: 82.99
+    joint_5: -5.49
+    joint_6: -16.27
+    joint_7: 62.33
+  - joint_1: -75.02
+    joint_2: -1.37
+    joint_3: -0.23
+    joint_4: 105.39
+    joint_5: -9.60
+    joint_6: -10.89
+    joint_7: 40.56
+  - joint_1: -75.17
+    joint_2: -1.34
+    joint_3: -0.23
+    joint_4: 130.57
+    joint_5: -9.43
+    joint_6: -10.47
+    joint_7: 23.40
+  - joint_1: -75.19
+    joint_2: -1.34
+    joint_3: -0.23
+    joint_4: 138.35
+    joint_5: -9.43
+    joint_6: -5.99
+    joint_7: 22.59
+  - joint_1: -75.15
+    joint_2: -1.34
+    joint_3: 2.44
+    joint_4: 138.90
+    joint_5: -9.84
+    joint_6: 1.70
+    joint_7: 31.05
+  - joint_1: -74.86
+    joint_2: -1.34
+    joint_3: 6.31
+    joint_4: 138.90
+    joint_5: -10.30
+    joint_6: 17.96
+    joint_7: 29.68
+joint_1: -74.84
+joint_2: -1.34
+joint_3: 7.49
+joint_4: 138.90
+joint_5: -13.47
+joint_6: 20.52
+joint_7: 29.83
+gripper: 0.0
