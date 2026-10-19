@@ -120,11 +120,13 @@ for _d in /sys/bus/usb/devices/*; do
 done
 _cs=()
 if [ -n "${D405_GAIN:-}" ]; then _cs+=(--d405-gain "$D405_GAIN" --d405-exposure "${D405_EXPOSURE:-28000}"); else _cs+=(--d405-auto); fi   # 空なら前セッションの手動値を自動露出へ戻す
-[ -n "${D435_BRIGHTNESS:-}" ] && _cs+=(--d435-brightness "$D435_BRIGHTNESS")
+if [ -n "${D435_GAIN:-}" ]; then _cs+=(--d435-gain "$D435_GAIN" --d435-exposure "${D435_EXPOSURE:-80}")   # 手動露出（白い机で自動露出+brightnessでは白飛びが解消しなかった場合に使う）
+elif [ -n "${D435_BRIGHTNESS:-}" ]; then _cs+=(--d435-brightness "$D435_BRIGHTNESS")
+fi
 if [ ${#_cs[@]} -gt 0 ]; then
   sleep 2
   "$HOME/projects/lerobot/.venv/bin/python" "$REPO/scripts/camera_setup.py" "${_cs[@]}" || { echo "[collect-bi] camera_setup（${_cs[*]}）に失敗。カメラを掴んでいるプロセスが無いか確認" >&2; exit 1; }
 fi
-export D405_GAIN D405_EXPOSURE D435_BRIGHTNESS
+export D405_GAIN D405_EXPOSURE D435_GAIN D435_EXPOSURE D435_BRIGHTNESS
 # pynput が無言でキーを食う既知問題の予防（ssh -X でも DISPLAY を落として stdin 直読みにする）
 exec env -u DISPLAY -u WAYLAND_DISPLAY bash "$REPO/scripts/record_bimanual_openarm.sh" "$TAG"
