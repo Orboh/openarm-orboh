@@ -8,6 +8,7 @@ config 側（OPENARM_CAMERAS / OPENARM_EMBODIMENT）とデータセット側（m
 meta/info.json の observation.state names）が食い違っていたら、dataloader を作る前に止める。
 """
 
+import inspect
 import json
 import os
 import sys
@@ -84,16 +85,19 @@ generate_stats(DS)
 generate_rel_stats(DS, tag)
 
 print("[3] build ShardedSingleStepDataset")
-ds = ShardedSingleStepDataset(
+_ds_kwargs = dict(
     dataset_path=DS,
     embodiment_tag=tag,
     modality_configs=mc,
-    video_backend="ffmpeg",  # CLI（AV1対応の static-ffmpeg v8.0 = ffmpeg+ffprobe を PATH に）。torchcodec は FFmpeg 共有ライブラリ不在で不可
     shard_size=4096,
     episode_sampling_rate=1.0,
     seed=42,
     allow_padding=True,
 )
+# video_backend は 2026-06-19（e574928）以降の Isaac-GR00T で引数ごと無くなった。受け付ける版でだけ渡す
+if "video_backend" in inspect.signature(ShardedSingleStepDataset.__init__).parameters:
+    _ds_kwargs["video_backend"] = "ffmpeg"  # CLI（AV1対応の static-ffmpeg v8.0 = ffmpeg+ffprobe を PATH に）。torchcodec は FFmpeg 共有ライブラリ不在で不可
+ds = ShardedSingleStepDataset(**_ds_kwargs)
 print("    num shards (len(ds)) =", len(ds))
 
 print("[4] load episode 0 (AV1 video + state/action) and extract step 0 via modality config")
