@@ -1,0 +1,26 @@
+diff --git a/gr00t/configs/finetune_config.py b/gr00t/configs/finetune_config.py
+index 15918e2..31a01a1 100644
+--- a/gr00t/configs/finetune_config.py
++++ b/gr00t/configs/finetune_config.py
+@@ -144,6 +144,9 @@ class FinetuneConfig:
+     wandb_project: str = "finetune-gr00t-n1d7"
+     """W&B project name to log runs to."""
+ 
++    seed: int = 42
++    """Random seed passed to config.data.seed (data sampling and Trainer)."""
++
+     save_steps: int = 1000
+     """Frequency (in training steps) at which to save checkpoints."""
+ 
+diff --git a/gr00t/experiment/launch_finetune.py b/gr00t/experiment/launch_finetune.py
+index 00cb3ef..f2023b4 100644
+--- a/gr00t/experiment/launch_finetune.py
++++ b/gr00t/experiment/launch_finetune.py
+@@ -122,6 +122,7 @@ if __name__ == "__main__":
+     config.data.episode_sampling_rate = ft_config.episode_sampling_rate
+     config.data.num_shards_per_epoch = ft_config.num_shards_per_epoch
+     config.data.ds_weights_alpha = ft_config.ds_weights_alpha
++    config.data.seed = ft_config.seed
+ 
+     config.training.save_only_model = ft_config.save_only_model
+     config.training.resume_from_checkpoint = ft_config.resume_from_checkpoint
