@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 """OpenArm 全アームのモータ health＋零位較正チェック（固定名・channel_id 運用版）
 
 各アームを briefly enable → 現在位置を読む → disable し、関節ごとの表を出す。
@@ -27,7 +27,17 @@ import argparse
 import sys
 import math
 
-import openarm_can as oa
+SYSTEM_PYTHON = "/usr/bin/python3"  # openarm_can（apt の python3-openarm-can）が入っている唯一の python
+
+try:
+    import openarm_can as oa
+except ModuleNotFoundError:
+    # `python scripts/openarm_motorcheck.py` は shebang を無視して conda / venv の python で動く。
+    # その python に openarm_can は無いので、システム python で自分を起動し直す（2026-10-24）。
+    if os.path.realpath(sys.executable) == os.path.realpath(SYSTEM_PYTHON) or not os.path.exists(SYSTEM_PYTHON):
+        raise
+    print(f"[motorcheck] {sys.executable} に openarm_can が無いので {SYSTEM_PYTHON} で起動し直す", file=sys.stderr)
+    os.execv(SYSTEM_PYTHON, [SYSTEM_PYTHON, os.path.abspath(__file__), *sys.argv[1:]])
 
 ARM_MOTOR_TYPES = [
     oa.MotorType.DM8009,  # J1

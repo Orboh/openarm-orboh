@@ -20,3 +20,6 @@ synced_at: 2026-10-20 17:18
 frozen_at: 2026-10-20 17:21
 datasets: Orboh/bi_openarm_takeei_wood_l1_chest_wristr_wristl_v1_20261020_171837
 collections: 20261020T081831Z-bi-takeei-wood-l1-v1-s1
+model_dir: ~/models/gr00t-bi-takeei-wood-l1-v1
+model_hf: Kota0612/gr00t-bi-takeei-wood-l1-v1
+lang: Pick up the wood and place it in the box

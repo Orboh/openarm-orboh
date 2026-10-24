@@ -136,6 +136,11 @@ BILATERAL_FEEDBACK="${BILATERAL_FEEDBACK:-false}"
 # 既定は false（左→右の順）。左右の経路が互いに干渉しないかは確認していないので、初回は dry で目視する。
 PARALLEL_ARMS="${PARALLEL_ARMS:-false}"
 case "$PARALLEL_ARMS" in true|false) ;; *) echo "[record-bi] PARALLEL_ARMS must be 'true' or 'false', got '$PARALLEL_ARMS'" >&2; exit 1 ;; esac
+# 2026-10-24: true で同じ 3 つの場面の leader と follower も同時に動かす（従来は follower→leader /
+# leader→follower の順）。PARALLEL_ARMS=true と合わせると 4 本が同時に動く。既定は false。
+# leader がソフトで動かせない（脱力の manual_control）ときの戻しは従来どおり何も動かさない。
+PARALLEL_LEADER_FOLLOWER="${PARALLEL_LEADER_FOLLOWER:-false}"
+case "$PARALLEL_LEADER_FOLLOWER" in true|false) ;; *) echo "[record-bi] PARALLEL_LEADER_FOLLOWER must be 'true' or 'false', got '$PARALLEL_LEADER_FOLLOWER'" >&2; exit 1 ;; esac
 # グリッパーの左右別ゲイン上書き（2026-10-19・空なら lerobot 側の既定値のまま＝CLIに渡さない）。
 # 実機確認で左右の感触差があった（can_fol_l に CAN LOST/BACK の既往あり。個体差の可能性も）。
 # 例: L_BILATERAL_GRIPPER_KP=1.0 L_BILATERAL_GRIPPER_KD=0.06 で左だけ弱める
@@ -578,7 +583,9 @@ fi
   echo "[record-bi] episode_advance=$EPISODE_ADVANCE"
   echo "[record-bi] dmlog=$(_dmlog_enabled && echo "on ifaces=${DMLOG_IFACES:-$FOLLOWER_L $FOLLOWER_R $LEADER_L $LEADER_R}" || echo off)"
   if [ "$EPISODE_ADVANCE" = "manual" ]; then
-    if [ "$PARALLEL_ARMS" = "true" ]; then
+    if [ "$PARALLEL_ARMS" = "true" ] && [ "$PARALLEL_LEADER_FOLLOWER" = "true" ]; then
+      echo "[record-bi]   起動時: follower・leader の 4 本が同時に自動整列する（PARALLEL_ARMS=true・PARALLEL_LEADER_FOLLOWER=true）。connect 前に両腕と机から手を引くこと"
+    elif [ "$PARALLEL_ARMS" = "true" ]; then
       echo "[record-bi]   起動時: follower 両腕 → leader 両腕の順に、左右同時に自動整列する（PARALLEL_ARMS=true）。connect 前に両腕と机から手を引くこと"
     else
       echo "[record-bi]   起動時: follower L→R, leader L→R の順に 1 本ずつ自動整列する。connect 前に両腕と机から手を引くこと"
@@ -596,7 +603,9 @@ fi
     else
       echo "[record-bi]   左矢印 = 直前のテイクを破棄して録り直す / esc = 収集終了"
     fi
-    if [ "$PARALLEL_ARMS" = "true" ]; then
+    if [ "$PARALLEL_ARMS" = "true" ] && [ "$PARALLEL_LEADER_FOLLOWER" = "true" ]; then
+      echo "[record-bi]   開始姿勢へ戻す前に両腕と机から手を引くこと（leader・follower の 4 本が同時に動く＝約 2.0 秒両腕が自律動作する）"
+    elif [ "$PARALLEL_ARMS" = "true" ]; then
       echo "[record-bi]   開始姿勢へ戻す前に両腕と机から手を引くこと（leader 両腕を同時に 2.0 秒、続いて follower 両腕 1.5 秒＝約 3.5 秒両腕が自律動作する）"
     else
       echo "[record-bi]   開始姿勢へ戻す前に両腕と机から手を引くこと（leader 左→右が各 2.0 秒、続いて follower 両腕 1.5 秒＝約 5.5 秒両腕が自律動作する）"
@@ -687,7 +696,7 @@ COMMAND_SH="$RUN_DIR/command.sh"
   printf 'TASK=%q \\\n' "$TASK"
   printf 'TASK_SLUG=%q \\\n' "$TASK_SLUG"
   printf 'GRAVITY_COMP=%q LSCALE=%q RSCALE=%q GRAVITY_URDF=%q ALIGN_GRAVITY=%q \\\n' "$GRAVITY_COMP" "$LSCALE" "$RSCALE" "$GRAVITY_URDF" "$ALIGN_GRAVITY"
-  printf 'BILATERAL_FEEDBACK=%q PARALLEL_ARMS=%q \\\n' "$BILATERAL_FEEDBACK" "$PARALLEL_ARMS"
+  printf 'BILATERAL_FEEDBACK=%q PARALLEL_ARMS=%q PARALLEL_LEADER_FOLLOWER=%q \\\n' "$BILATERAL_FEEDBACK" "$PARALLEL_ARMS" "$PARALLEL_LEADER_FOLLOWER"
   printf 'L_BILATERAL_GRIPPER_KP=%q L_BILATERAL_GRIPPER_KD=%q R_BILATERAL_GRIPPER_KP=%q R_BILATERAL_GRIPPER_KD=%q \\\n' \
     "$L_BILATERAL_GRIPPER_KP" "$L_BILATERAL_GRIPPER_KD" "$R_BILATERAL_GRIPPER_KP" "$R_BILATERAL_GRIPPER_KD"
   printf 'GRIPPER_KP=%q ARM_KP=%q \\\n' "$GRIPPER_KP" "$ARM_KP"
@@ -729,6 +738,7 @@ set +e
   ${ALIGN_GRAVITY_ARGS[@]+"${ALIGN_GRAVITY_ARGS[@]}"} \
   --robot.id=follower \
   --robot.parallel_arms="$PARALLEL_ARMS" --teleop.parallel_arms="$PARALLEL_ARMS" \
+  --parallel_leader_follower="$PARALLEL_LEADER_FOLLOWER" \
   --robot.cameras="$CAMERAS" \
   --teleop.type=bi_openarm_leader \
   --teleop.left_arm_config.port="$LEADER_L" \
