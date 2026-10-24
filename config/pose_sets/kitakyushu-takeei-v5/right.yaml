@@ -1,0 +1,80 @@
+# 2026-10-24 11:45 エディタ画面から保存: その時点のフォロワーの姿勢（元セット kitakyushu-takeei-v2）。経由地は元セットのまま。
+# OpenArm 開始姿勢 -- side=right, degrees (logical・follower)。
+# 2026-10-19 13:17 scripts/pose_from_dwell.py で生成: pose-kitakyushu-takeei-v2-20261019-131524.csv の一番長い静止区間 t=19.2〜34.4s（15.2s）の中央値。
+# waypoints = その直前の経路（t=4.2〜19.2s）を RDP で間引いた点（直線と実経路のずれ ≤ 5.0°）。
+# 整列は現在姿勢から waypoints を順にたどり、最後にこの開始姿勢へ入る（関節空間の直線補間・衝突判定なし）。
+# gripper は較正ゼロに固定（起動時の非ゼロ把持指令で follower gripper を壊した事故による約束）。
+align:
+  max_speed_dps: 40.0
+waypoints:
+  - joint_1: -6.74
+    joint_2: -0.84
+    joint_3: 0.12
+    joint_4: 22.45
+    joint_5: -2.98
+    joint_6: -0.92
+    joint_7: -9.12
+  - joint_1: -6.76
+    joint_2: -0.84
+    joint_3: 0.12
+    joint_4: 22.45
+    joint_5: -3.00
+    joint_6: -0.92
+    joint_7: -4.84
+  - joint_1: -20.31
+    joint_2: 0.54
+    joint_3: 0.01
+    joint_4: 23.19
+    joint_5: -2.96
+    joint_6: -0.96
+    joint_7: 31.88
+  - joint_1: -47.04
+    joint_2: 1.30
+    joint_3: 0.85
+    joint_4: 65.53
+    joint_5: -2.98
+    joint_6: -1.14
+    joint_7: 41.72
+  - joint_1: -53.84
+    joint_2: 1.30
+    joint_3: 3.62
+    joint_4: 71.08
+    joint_5: -2.98
+    joint_6: -1.14
+    joint_7: 57.24
+  - joint_1: -55.15
+    joint_2: 1.30
+    joint_3: 3.62
+    joint_4: 71.08
+    joint_5: -2.98
+    joint_6: -1.14
+    joint_7: 63.34
+  - joint_1: -58.16
+    joint_2: 1.30
+    joint_3: 3.62
+    joint_4: 85.39
+    joint_5: -3.00
+    joint_6: -1.14
+    joint_7: 63.27
+  - joint_1: -58.01
+    joint_2: 1.23
+    joint_3: 3.62
+    joint_4: 85.39
+    joint_5: 5.68
+    joint_6: -1.14
+    joint_7: 63.95
+  - joint_1: -58.01
+    joint_2: 1.23
+    joint_3: 3.56
+    joint_4: 85.39
+    joint_5: -0.86
+    joint_6: -1.14
+    joint_7: 63.95
+joint_1: -58.06
+joint_2: 0.38
+joint_3: 4.80
+joint_4: 101.24
+joint_5: 2.44
+joint_6: 1.68
+joint_7: 58.13
+gripper: 0.0

@@ -1,0 +1,136 @@
+# シーンプロファイル: 北九州(九工大) タケエイ仕分け汎化テスト v1 — 両腕で雑多な廃棄物を
+# 1個ずつ拾い、アームの左右どちらかへ大まかに仕分ける — 2026-10-19 起草
+#
+# 計画の背景: 板橋(itabashi)で収集・学習した takeei-sort タスク(gr00t-bi-takeei-sort-v1)の
+# 開始姿勢セット takeei-v2 を引き継ぎ、新しい拠点(北九州・九州工業大学)で新規データを収集して
+# 新しいモデルを学習する(takeei-v2 の set.yaml に記載の計画どおり・ファイル名も指定済み)。
+# 書式の手本: scenes/itabashi-takeei-v1.yaml（板橋の先行シーン）。
+#
+# **状態: 下書き。TODO が残っている間は本番(gate/session)を起動できない（dry は SCENE=none）。**
+#
+# 板橋との違い: 対象物の種類・置き場所・散らし方を厳密に固定していない（段階 A の決め打ちでは
+# なく、もっと緩い「複数種類を1個ずつ・左右どちらかへ」という汎化寄りのタスク）。
+
+name: kitakyushu-takeei-v1
+created: 2026-10-19
+measured: 2026-10-19            # 会話内での実測(机・カメラ)。90cmへの昇降変更後の画角再確認はTODO
+task: takeei-sort-generalize     # 板橋の takeei-sort と区別する（対象物・置き場所が緩い）
+note: >
+  九州工業大学(北九州)の OpenArm 両腕で、机上に積まれた雑多な廃棄物(緩衝材・ブルーシート・
+  円柱状の木材・発泡スチロール・ダンボール等)を1個ずつ拾い、アームの左右どちらか(厳密な
+  置き先は決めない)へ移すデータを録る。板橋の takeei-sort(4品目・固定順・固定置き場)とは
+  違い、対象物の種類・個数・置き場所を厳密に固定しない汎化テストという位置づけ。
+  開始姿勢・経路は takeei-v2（板橋）を引き継ぐ。キャリブレーション(bump_to_stop)時に
+  机との干渉が無いか目視確認しながら進める運用（2026-10-19 Kota 決定）。
+
+# --- 腕の役割（両腕とも作業。品目ごとの左右割り当ては固定しない） -----------------
+arm_roles:
+  left: "作業。左側へ運ぶ物を担当（品目ごとの固定割り当てはしない。取りやすい方で拾う）"
+  right: "作業。右側へ運ぶ物を担当（同上）"
+  assignment_rule: "板橋(takeei-v2)のように品目ごとに決め打ちしない。どちらの腕で拾うかは
+    エピソードごとに操作者が自然に選ぶ（汎化テストのため固定しない・2026-10-19 Kota 決定）"
+  right_hold_method: none
+  right_pose_source: "config/pose_sets/takeei-v2/right.yaml（板橋から引き継ぎ。経由地つき）"
+
+# --- 机（ロボット固定部） -----------------------------------------------------
+robot_base:
+  mounted_on: height_adjustable_table   # ロボット自体が昇降デスクにグリップ固定されている
+  table_height_mm: 900        # 2026-10-19 実測(会話内)。当初 740mm だったが、アームのリーチが
+    # 不足したため 900mm へ変更(画角内の全ゴミに腕が届くようにするため)
+  base_plate_tip_to_table_edge_mm: 60   # 2026-10-19 実測(会話内)。グリップ幅ぶん
+  base_mount: grip
+  base_mount_detail: "グリップでロボット底板を昇降デスクの縁に固定"
+
+table:
+  kind: height_adjustable
+  height_mm: 900               # 床から天板まで。2026-10-19 実測(会話内)。当初740mm→リーチ確保のため900mmへ変更
+  desk_preset: "90"            # 昇降テーブルの表示値（床からの高さcm。74cm時代は表示74・一致確認済み）
+  surface: "丈夫な白いプラスチック"
+  base_to_table_edge_mm: 60
+  base_mount: "グリップでロボット底板を昇降デスクの縁に固定"
+
+mat:
+  present: false                # 敷かない。廃棄物は机に直接積まれている
+  kind: null
+  orientation: null
+
+lighting:
+  source: "施設の常設照明のみ(変化なし・2026-10-19 Kota確認)"
+  window: "窓からの採光なし(2026-10-19 Kota確認)"
+  daylight_controlled: false
+  daylight_recorded_at: "session layer（manifest.identity.started_local / notes.md の lighting_observed）"
+  note: "照明は常時一定とのことなので、昼夜の管理は不要と考えられる(2026-10-19時点の認識。要再確認)"
+
+# --- 対象物（複数種類の雑多な廃棄物。固定の個数・順序は無し） --------------------
+object:
+  kind: mixed_waste_items
+  count: 25                    # 2026-10-19 Kota実機確認(約25個)
+  description: >
+    机上に積まれた雑多な廃棄物の山。確認済みの品目: 茶色い輸送用緩衝材、青いビニールシート、
+    円柱状の木材、発泡スチロール、ダンボール。板橋のように4品目に絞らず、山にあるものを
+    そのまま使う(汎化目的)。
+  fill: solid
+  orientation: "固定しない(山から自然に取れる向きで拾う)"
+  condition: "劣化しない前提・同一セットで通す想定(収集初日に要確認)"
+
+place_target:
+  kind: left_or_right_loose    # 厳密な置き先マーカー無し。アームの左右どちらかへ大まかに置く
+  position: "アームの左側 or 右側(大まか)"
+  position_origin: "n/a(マーカーを置かず、大まかな方向のみ指定・2026-10-19 Kota決定)"
+  markers: none
+  size_mm: n/a
+
+# --- 散らし方（山からの取り出し。固定スロットなし） ------------------------------
+scatter_policy:
+  mode: pile                   # 固定スロットではなく「山から取る」方式
+  layout: "アーム手前 約80mm(8cm)の位置に雑多な廃棄物の山(昇降デスク上)"
+  cells: []
+  strict: false
+  placement: "アーム正面やや手前"
+  numbering: "位置を番号で管理しない(山からランダムに取るため)"
+  reference_mark: none
+  reference_mark_position_mm: n/a
+  reference_mark_origin: n/a
+  reference_mark_in_camera_view: n/a
+  marking: none
+  cell_size_mm: n/a
+  area_mm: "机の広い範囲にまんべんなく分布(正確な寸法は未測定・2026-10-19 Kota確認)"
+  per_session: "gate 10本 → 以後50本×3セッション → 40本（合計200本・配分は現場で調整可）"
+  session_count: 4              # gate含め4セッションを想定(10+50+50+50+40=200)
+  intentional_imbalance: none
+
+distractors:
+  present: false
+  items: []
+
+# --- カメラの物理位置 -------------------------------------------------------
+camera_mount:
+  chest:
+    height_mm: 700              # OpenArm底板からの高さ(2026-10-19実測・会話内)
+    height_ref: "OpenArm底板から、取り付けパーツ基準"
+    tilt_deg: 45                # 下向き45度(目分量・2026-10-19)
+    mount_part: "自作のカメラマウント(既製品ではない)"
+    view_note: >
+      机を74cm→90cmへ上げたことで、廃棄物の山とアームのリーチの両立を狙った
+      (画角に入る範囲のみ対象物として選定する運用・2026-10-19 Kota決定)。
+      ただし90cmへの変更後の画角の最終確認(山全体が入るか)はTODO —
+      収集初日にプレビュー(rerun)で再確認すること。
+  wrist_left:
+    mount_part: "D405用手首マウント(部品名 unknown)"
+    serial: "409122272149"     # 2026-10-19 lerobot-find-cameras + 非常停止ボタンの映り込みで確認
+    orientation: unknown
+    view_note: >
+      待機姿勢では機材・ケーブルを向いており山は写らないが、アームを山の方へ下げると
+      グリップ指の間に発泡スチロール・段ボール・ブルーシート・気泡緩衝材が写ることを
+      実機で確認(2026-10-19 Kota)。露出設定は右手首と同じ(exposure=8000, gain=16)を
+      全D405に適用済みで白飛び無し。
+  wrist_right:
+    mount_part: "D405用手首マウント(部品名 unknown)"
+    serial: "352122273417"     # 2026-10-19 消去法で確認(左の非常停止ボタン写り込みから)
+    orientation: unknown
+    view_note: >
+      待機姿勢では機材・ケーブルを向いており山は写らないが、アームを山の方へ下げると
+      グリップ指の間に発泡スチロール・木材・段ボール・ブルーシートが写ることを実機で確認
+      (2026-10-19 Kota)。露出は自動だと白い梱包材が白飛びするため手動
+      (exposure=8000, gain=16)に変更して解消（camera_setup.py --d405-gain 16
+      --d405-exposure 8000。collect起動時に焼く運用）。

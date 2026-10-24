@@ -49,6 +49,15 @@ if [ "$MODE" != "dry" ] && [ "${SCENE:-TODO}" = "TODO" ]; then
   exit 1
 fi
 
+# CAN 4 本の事前確認（2026-10-21）。PEAK が USB ごと再接続されると udev は固定名だけ付け直し、
+# ビットレート設定と UP は消える。そのまま起動するとフォロワー整列（約 30 秒）の後に
+# リーダー connect で "Network is down" で落ちるので、起動前に止める。
+if ! bash "$REPO/scripts/can_check.sh" can_lead_r can_lead_l can_fol_r can_fol_l; then
+  echo "[collect-bi] CAN が 4 本そろっていない。sudo bash scripts/canup.sh をやり直してから再実行する。" >&2
+  echo "[collect-bi] 繰り返すなら PEAK の USB 抜けを疑う: journalctl -k | grep -E 'USB disconnect|error -71'" >&2
+  exit 1
+fi
+
 case "$MODE" in
   dry)
     SUFFIX="dry"; NUM="${3:-${2:-2}}"
