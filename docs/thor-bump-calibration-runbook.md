@@ -1,7 +1,7 @@
 # Thor 実機チューニング・検証 runbook: bump-to-stop 較正と開始姿勢固定
 
 対象: OpenArm leader/follower(左右)。Vector 側でオフライン検証済みのコードを Thor 実機で仕上げるための手順。
-コード: lerobot fork `~/projects/lerobot`(branch `feat/record-headless-keyboard`)
+コード: lerobot fork `~/projects/lerobot`(branch `feat/openarm-remote-teleop`)
 中核: `src/lerobot/motors/damiao/damiao_bump_calibration.py`
 起動: `openarm-orboh/scripts/calibrate_openarm.sh <left|right> bump_to_stop`
 
@@ -86,6 +86,9 @@ lerobot-calibrate --robot.type=openarm_follower --robot.port=can_fol_r \
 ---
 
 ## 4. per-unit ストッパ角(MECH_LIM)の検証と上書き
+
+> **2026-09-22 追記（必読）**: bump-to-stop は **1 関節だけ、ちょうど 36.00°（dm4310・減速比 10:1 の出力側 1 モータ回転分）ずれた零点を残すことがある**。実例＝leader_left の J5。09-21 15:34 の bump は homing_offset +28.37°、09-22 08:54 のやり直しは −7.63°（差 36.00°・他 7 関節は 0.07° 以内で同一）、09-22 11:42 の 3 回目は +28.366°（09-21 と 0.001° まで一致）。当初は 09-21 側を誤検知と判断したが、左 follower と前腕を同じ向きに手で持って logical J5 を比べる検査（leader − follower ＝ +43°）と 3 回目の再現で **08:54 側が外れ値**と確定した。目視の「ねじれている／真っすぐ」だけでは判断が 2 度裏返った。**較正直後に必ず下の §4 の検算（垂らし読みで >10° 警告が無いこと）と §7 の leader/follower 開始一致を見る。ロール系（J3/J5/J7）は垂らしで定まらないので、対の unit（leader なら同側 follower）と前腕を同じ向きに持って logical を比べ、差が 36 の倍数付近なら巻き数ずれ＝その unit だけ再 bump する。** トルクしきい値の誤検知（§3）なら差は 36 の倍数に揃わないので、そこで型を見分ける。leader だけやり直す場合は `lerobot-calibrate --teleop.type=openarm_leader --teleop.port=can_lead_<l|r> --teleop.id=leader_<left|right> --teleop.calibration_anchor=bump_to_stop --teleop.gravity_side=<left|right> --teleop.rezero_on_connect=false --teleop.align_on_connect=false`（`calibrate_openarm.sh` は follower→leader を続けて回す）。
+
 
 公称値(URDF リミット準拠、右): J1 -80 / J2 -10 / J3 +90 / J4 0 / J5 +90 / J6 +45 / J7 +90 deg
 (左は J1 +80 / J2 +10、他は同じ)。個体の組付け公差でズレるため、較正後に検証する:

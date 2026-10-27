@@ -38,6 +38,11 @@
 #   条件を残さない dry run は SCENE=none / TODO 入りシーンは ALLOW_TODO_SCENE=true。
 set -euo pipefail
 
+# repo ルート(このスクリプトの一つ上)。GRAVITY_URDF の既定値・POSE/SCENE の解決・
+# check_repo_sync.sh 呼び出しなど、スクリプト全体で使う。BASH_SOURCE を使うので
+# source されても解決する。
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
 # ---- Arm pair (channel_id fixed CAN names -- USB/PC independent) -------------
 SIDE="${SIDE:-left}"                        # left | right
 case "$SIDE" in
@@ -108,7 +113,9 @@ fi
 # clean across the day's sessions) so all 5 sessions share one value.
 GRAVITY_COMP="${GRAVITY_COMP:-true}"
 GRAVITY_SCALE="${GRAVITY_SCALE:-1.0}"
-GRAVITY_URDF="${GRAVITY_URDF:-$(cd "$(dirname "$0")/.." && pwd)/urdf/openarm_v10_bimanual.urdf}"
+# hand-port of eec9666 (cherry-pick conflicted): repo-relative ($HOME/openarm-orboh
+# 決め打ちだと Thor/Vector の ~/projects/openarm-orboh 配置で壊れる。REPO は上で解決済み)
+GRAVITY_URDF="${GRAVITY_URDF:-$REPO/urdf/openarm_v10_bimanual.urdf}"
 
 # ---- Dataset tunables --------------------------------------------------------
 NUM_EPISODES="${NUM_EPISODES:-50}"
@@ -139,8 +146,10 @@ DISPLAY_DATA="${DISPLAY_DATA:-true}"        # set false for headless dry-run
 #     無断で腕を動かさずゲート+キー押しアラインにしてある)。
 #   - 収集セッションを跨ぐ場合も同じ ready YAML を使い続ける(較正=恒久ゼロ +
 #     同一 YAML で、セッション間の座標系ずれ・開始姿勢ずれの両方を防ぐ)。
-REPO="$(cd "$(dirname "$0")/.." && pwd)"
-POSE="$REPO/config/initial_pose_${SIDE}.yaml"
+# REPO は冒頭で解決済み。
+source "$REPO/scripts/lib/pose_set.sh"
+pose_set_load current || exit 1
+if [ "$SIDE" = left ]; then POSE="$LPOSE"; else POSE="$RPOSE"; fi
 POSE_ARGS=()
 if [ -f "$POSE" ]; then
   POSE_ARGS+=(--robot.initial_pose_path="$POSE")
@@ -291,6 +300,10 @@ if [ -n "$SCENE_PATH" ]; then
     echo "[record] 警告: シーン sha が前回と違う（$2 → $3・ALLOW_SCENE_DRIFT=true）" >&2
   fi
 fi
+
+# 開始姿勢セットの照合（2026-09-30）。draft のセットなら今の較正・シーン・コードの版を取り込み、
+# frozen のセットなら開始姿勢・較正・シーンが凍結時と 1 つでも違えば止める（条件を変えたら新しいセット）。
+pose_set_prepare_record "$SCENE" || exit 1
 
 # 開始姿勢 YAML も同じ穴を持つ(シーンと違い名前は変えず内容を撮り直しうる)。
 # 撮り直すと50epが2条件に割れても各runの記録自体は正しいまま学習の分析時まで
@@ -544,6 +557,9 @@ if ! "$PYTHON_BIN" "$MANIFEST_TOOL" resolve --run-dir "$RUN_DIR" --exit-code "$R
      > "$MANIFEST_RESOLVE_OUT" 2>&1; then
   echo "[record] 警告: manifest の事後解決に失敗した(stamp 後 repo_id が未記録)" >> "$MANIFEST_RESOLVE_OUT"
 fi
+
+# 本番の収集でデータセットが作られたら、セットを凍結する（以後この組は変えない・2026-09-30）。
+pose_set_freeze "$RUN_DIR" 2>&1 | tee -a "$CONSOLE_LOG"
 
 {
   echo "[record] lerobot-record exit=$RC"

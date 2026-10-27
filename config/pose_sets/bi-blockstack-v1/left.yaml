@@ -1,0 +1,21 @@
+# OpenArm teleop start (ready) pose -- side=left, degrees.
+# Derived 2026-09-21 as the exact mirror of initial_pose_right.yaml (the 2026-09-05
+# re-capture on Thor: J1 -69.38 / J7 80.75) via pinocchio FK on
+# openarm_v10_bimanual.urdf: flip the sign of every joint except joint_4 (elbow).
+# Mirror check (link7 and hand_tcp): pos diff 0.000 mm / rot diff 0.000 deg.
+# Supersedes the 2026-08-27 mirror of the 2026-08-05 right capture.
+# Consumed by align_on_connect via --...initial_pose_path. gripper pinned to
+# calibration zero.
+# 2026-09-22 (Itabashi bimanual, Kento decision): joint_7 set to 0.0 on both sides. The +-80.75
+# wrist roll snapped back ~73 deg to ~0 within 0.4 s the moment align_on_connect released the
+# hold (leader gravity feed-forward, computed for the follower hand mass, is unbalanced on the
+# leader handle and drives J7 to the model equilibrium near 0). Aligning at 0 removes the snap
+# and makes the start-pose gate meaningful. Mirror (left = -right) still holds for joint_7.
+joint_1: 69.38
+joint_2: 1.5
+joint_3: -0.26
+joint_4: 74.73
+joint_5: -1.04
+joint_6: -1.11
+joint_7: 0.0
+gripper: 0.0

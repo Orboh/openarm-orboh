@@ -11,7 +11,10 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 URDF="$REPO/urdf/openarm_v10_bimanual.urdf"
 PY="$HOME/projects/lerobot/.venv/bin/python"
 # 開始姿勢: キャプチャ済み(scripts/capture_initial_pose.sh left)なら使う。無ければ公式既定(肘36°)。
-POSE="$REPO/config/initial_pose_left.yaml"
+# 開始姿勢セット（POSE_SET・未指定なら config/pose_sets/CURRENT）の left.yaml
+source "$REPO/scripts/lib/pose_set.sh"
+pose_set_load current || exit 1
+POSE="$LPOSE"
 POSE_ARGS=()
 [ -f "$POSE" ] && POSE_ARGS+=(--teleop.initial_pose_path="$POSE")
 "$PY" -m lerobot.teleoperators.openarm_leader_remote.leader_agent \

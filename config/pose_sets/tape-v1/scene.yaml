@@ -1,0 +1,88 @@
+# シーンプロファイル: ビニールテープ pick-and-place・机上・chest+wrist
+#
+# このファイルは「物理配置の宣言」であって、ソフトの挙動は変えない。
+# 収集スクリプトは SCENE=tape-desk-v1 を受け取り、このファイルの sha を
+# manifest.json に焼き込むだけ。だから守るルールは1つだけ:
+#
+#   物理配置を変えたら「新しいファイル」を作る。このファイルの中身は書き換えない。
+#   ただし境界は「最初のエピソード」。0本のうちは書き換えてよい。
+#
+# 2026-09-05 作成。bottle-desk-v1 とは別タスク・別カメラ構成(chest+wrist)のため新設。
+
+name: tape-desk-v1
+created: "2026-09-05"
+measured: "2026-09-05"
+task: tape-pick-and-place
+note: "TODO: 操作者名・混ぜてはいけない相手を記入"
+
+# --- 机 ---------------------------------------------------------------------
+table:
+  kind: height_adjustable
+  height_mm: 900             # 昇降テーブル表示値 90 からの換算(表示はcm刻み・実測未確認)
+  desk_preset: "90"
+  surface: "TODO"            # bottle-desk-v1と同一の机なら同じ値のはず(要確認)
+  base_to_table_edge_mm: TODO
+  base_mount: "TODO"
+
+mat:
+  present: TODO
+  kind: TODO
+  orientation: TODO
+
+lighting:
+  source: "TODO"
+  window: "TODO"
+  daylight_controlled: false
+  daylight_recorded_at: "session layer（manifest.identity.started_local / notes.md の lighting_observed）"
+  note: "TODO"
+
+# --- 対象物 -----------------------------------------------------------------
+object:
+  kind: vinyl_tape
+  count: TODO
+  description: "TODO"        # 色・幅・巻き径など
+  fill: "TODO"
+  orientation: "TODO"
+  condition: "TODO"
+
+place_target:
+  kind: bin
+  position: "TODO"
+  position_origin: "TODO"
+  markers: "TODO"
+  size_mm: "TODO"
+
+# --- 散らし方 ---------------------------------------------------------------
+scatter_policy:
+  mode: TODO
+  layout: TODO
+  cells: TODO
+  strict: false
+  placement: TODO
+  numbering: TODO
+  reference_mark: TODO
+  reference_mark_position_mm: TODO
+  reference_mark_origin: TODO
+  reference_mark_in_camera_view: TODO
+  marking: TODO
+  cell_size_mm: TODO
+  area_mm: TODO
+  per_session: TODO
+  session_count: TODO
+  intentional_imbalance: TODO
+
+distractors:
+  present: TODO
+  items: []
+
+# --- カメラの物理位置 -------------------------------------------------------
+camera_mount:
+  chest:
+    height_mm: TODO           # bottle-desk-v1と同一マウントなら500のはず(要確認)
+    height_ref: "取り付けパーツの上端／OpenArm 底板からの高さ"
+    tilt_deg: TODO
+    mount_part: "TODO"
+    view_note: "TODO"
+  wrist_right:
+    mount_part: "TODO"        # D405の取り付け方法
+    view_note: "TODO"         # 何が写るか(グリッパ先端との相対位置など)

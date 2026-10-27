@@ -1,0 +1,149 @@
+# 板橋 積み木 v2 — 右腕を固定してカメラ役・左腕だけで積む —— 2026-09-23 起草（Claude・Kento 決定）
+#
+# v1（scenes/itabashi-blockstack-v1.yaml・両腕で積む・50ep）の rollout 10 本が
+# 「掴めて運べるが一度も置けない」で頭打ちになったことを受けた作り直し。
+# 診断は rollouts/bi-blockstack-v1/rollout-log-bi-blockstack-v1.md の §6b・10 本の総括。
+#   置く瞬間に腕とグリッパが chest の画角を覆い、置き先が見えない
+#   → 「この画になったら離す」が学習データに存在しない → 離す動作が方策として出ない
+#   → R10 では人が手で円筒を左手の真下に置いても離さなかった（位置の問題ではない）
+# v2 の狙い: 右腕を固定して右 wrist カメラで接地面（積む場所）を映し続け、
+#   置く瞬間も置き先が視野にある状態を作る。
+#
+# 物理配置の宣言。ソフトの挙動は変えない。SCENE=itabashi-blockstack-leftarm-rightcam-v1 で
+# 収集を起動するとこのファイルの sha が manifest.json に焼かれる。
+# **1 本でも録った後は書き換えず -v2 を作る。**
+# 未測の項目は TODO でなく unknown / deferred と書く（record の TODO ガードは通す）。
+
+name: itabashi-blockstack-leftarm-rightcam-v1
+created: 2026-09-23
+measured: 2026-09-23        # 机・照明・積み木は v1 の実測を継承。右腕の姿勢と画角は収集直前に実測して埋める
+task: blockstack_leftarm    # 2026-09-23 確定。TASK 文は「Stack the three wooden blocks with the left arm while the right arm holds the camera steady」
+note: >
+  板橋の OpenArm 両腕（chest D435i + 左右 wrist D405 の 3 眼）で「左腕だけで積み木を積む」を録る。
+  **右腕は動かさず、右 wrist カメラで積む場所（接地面）を映し続けるカメラ役に徹する。**
+  1 エピソード = 左腕が円筒を土台として、その上に立方体、さらに三角柱を載せる（3 個・順序固定）。
+  拾う位置は固定・散らしなし・妨害物なし。収集者 Kento。
+  較正フレームは 2026-09-21〜22 の bump-to-stop 版、開始姿勢は 2026-09-22 に J7 を両腕 0.0 にした版
+  （rollout 10 本で初回指令の乖離 1.4° 前後を確認済み）。
+  v1（両腕で積む 50ep・器 ..._172101 ほか）とは**タスク構成が違うので混ぜない**。
+
+# --- 腕の役割（v2 の中核・v1 から変わった点） -------------------------------
+arm_roles:
+  left: "作業。3 個すべてを左腕だけで拾って積む"
+  right: "カメラ保持。動かさない。右 wrist D405 が積む場所（接地面）を映し続ける"
+  right_hold_method: program_hold  # 制御で固定する（2026-09-23 Kento 決定。人が leader を持ち
+    # 続ける案は取らない）。scripts/hold_pose.py が config/initial_pose_right_rightcam.yaml の
+    # 姿勢へ経由地をたどって上がり、そのまま位置指令で保持し続ける。Ctrl-C では経由地を逆順に
+    # 退避してから切るので、止めても腕が机へ落ちない。
+    # 人保持を採らなかった理由: leader の wrist roll は重力フィードフォワードが釣り合わず
+    # 手を離すと 0 付近へ戻る（2026-09-23 実機で確認）。人が握力で押さえる構成では
+    # 50 本ぶん画のロールが毎回ぶれる。
+  right_pose_deg: [24.7, 3.0, 16.1, 41.6, 75.0, 37.7, -68.5]   # logical [deg]・J1..J7
+    # 2026-09-23 板橋。右 leader を手で動かして画角を決め、openarm_pose_monitor の MARK で
+    # 右 follower の logical を読んだ値。正本は config/initial_pose_right_rightcam.yaml
+    # （経由地つき。下から直接この姿勢へ向かうと腕が机に激突するため）。
+  right_gripper_deg: -65        # 開いた状態で保持する（閉じた指が右 wrist の画角を塞ぐため）。
+    # 剛性は 12（収集で使う値）。開いたままの保持はコイル過温ラッチ(0xC)が立つ条件なので、
+    # 赤点滅したら damiao_probe_state.py で読んで damiao_errcheck.py --clear-motor で解除する。
+  right_view_note: >
+    置き場所（接地面）が中央寄りに入る。同じ画に拾う位置の積み木 3 個、作業する左腕の手先と
+    グリッパ、積み上がっていく高さ方向も入る。机の縁と背景も写り込む。
+    v2 の狙い（置く瞬間に置き先が見えている状態を作る）は満たしている。2026-09-23 目視確認。
+  rationale: >
+    v1 の rollout 10 本は「掴む・運ぶ」は出るが「置く」が 10 本中 0 だった。
+    置く瞬間に置き先が視野から消えるため、離す条件が視覚に紐付いていない。
+    右腕をカメラ役に分けることで、置く瞬間も接地面が見える状態を作る。
+    将来「右手でカメラやライトを保持しながら左手で作業する」構成の知見も兼ねる（Kento 2026-09-23）。
+
+# --- 机（v1 から継承） -------------------------------------------------------
+robot_base:
+  mounted_on: fixed_table
+  table_height_mm: 720
+  base_plate_tip_to_table_edge_mm: 30
+  base_mount: fixed
+  base_mount_detail: unknown
+
+table:
+  kind: height_adjustable
+  height_mm: 960
+  desk_preset: unknown
+  surface: unknown
+  relation_to_robot: "OpenArm の固定机（720 mm）の前に昇降テーブル（960 mm）。作業面はロボット底板より 240 mm 高い"
+
+mat:
+  present: false
+  kind: null
+  orientation: null
+
+lighting:
+  source: "板橋オフィスの常設天井照明（暖色）のみ。追加光源なし"
+  window: unknown
+  daylight_controlled: false
+  daylight_recorded_at: "session layer（manifest.identity.started_local / notes.md の lighting_observed）"
+  note: "v1 は 16〜18 時台。v2 は 2026-09-23 の 18 時台以降に開始。セッションごとの実時刻は
+    manifest.identity.started_local に入るので、ここは帯だけを持つ"
+
+# --- 対象物（v1 から継承） ---------------------------------------------------
+object:
+  kind: wooden_block
+  count: 3
+  shapes: [cylinder, cube, triangular_prism]   # 下から: 円筒（土台）→ 立方体 → 三角柱
+  description: "円筒（土台）、立方体、三角柱の木製積み木 3 個。1 辺の mm・色・表面は未計測"
+  fill: solid
+  orientation: fixed
+  condition: 劣化しない前提・同一セットで通す（欠け／汚れが出たら notes.md）
+
+place_target:
+  kind: fixed_spot              # 積む場所は 1 か所固定
+  position: unknown             # 未計測（メジャーを当てていない）。v1 と同じ固定位置を踏襲
+  position_origin: unknown
+  markers: unknown
+  size_mm: unknown
+  visible_in_right_wrist: true  # 2026-09-23 プレビューで確認（中央寄りに写る）
+
+# --- 散らし方（v1 と同じ・散らさない） ---------------------------------------
+scatter_policy:
+  mode: fixed
+  layout: "形ごとに 1 か所（円筒・立方体・三角柱）"
+  cells: 1
+  strict: true
+  placement: unknown            # 未計測。v1 と同じ固定位置を踏襲（散らしなし）
+  numbering: n/a
+  reference_mark: none
+  reference_mark_position_mm: n/a
+  reference_mark_origin: n/a
+  reference_mark_in_camera_view: n/a
+  marking: visual_only
+  cell_size_mm: n/a
+  area_mm: n/a
+  per_session: "gate 10 本、以後 1 セッション 10 本"
+  session_count: "5 セッションで 50 本（v1 と同じ規模）"
+  intentional_imbalance: none
+
+distractors:
+  present: false
+  items: []
+
+# --- カメラの物理位置 -------------------------------------------------------
+camera_mount:
+  chest:
+    height_mm: 650
+    height_ref: "OpenArm の台（底板）からの高さ"
+    tilt_deg: unknown
+    mount_part: unknown
+    view_note: "全体の俯瞰。v1 では積み木 3 個が開始時に写るが、腕が近づくと隠れる（rollout §6b）"
+  wrist_right:
+    mount_part: "D405 用手首マウント（部品名 unknown）"
+    orientation: >
+      arm_roles.right_pose_deg で固定したときの向き。手首を返して接地面を斜め上から見下ろす。
+      画は鉛直基準から回っているが、**50 本すべてで同じであれば学習上は問題にしない**
+      （要件は「上が上」ではなく「毎回同じ」）。向きの正本は
+      config/initial_pose_right_rightcam.yaml の関節角。
+    view_note: >
+      接地面・拾う位置の積み木 3 個・左腕の手先とグリッパ・積み上がる高さ方向。机の縁と背景も入る。
+      収集中この腕は動かさない（program_hold）ので、画角は全エピソードで同一になる。
+    role: "固定カメラ。収集中は動かさない"
+  wrist_left:
+    mount_part: "D405 用手首マウント（部品名 unknown）"
+    orientation: unknown
+    view_note: "作業する左手の手元。把持の瞬間が写る"

@@ -2,9 +2,10 @@
 
 usage: uv run --no-sync python openarm_embodiment/check_dataloader.py <dataset_path>
        OPENARM_CAMERAS=chest uv run --no-sync python ... <dataset_path>   # chest 単眼データのとき
+       OPENARM_EMBODIMENT=bimanual uv run --no-sync python ... <dataset_path>  # 両腕16DoFデータのとき
 
-config 側（OPENARM_CAMERAS）とデータセット側（meta/modality.json の video キー）のカメラが
-食い違っていたら、dataloader を作る前に止める。
+config 側（OPENARM_CAMERAS / OPENARM_EMBODIMENT）とデータセット側（meta/modality.json、
+meta/info.json の observation.state names）が食い違っていたら、dataloader を作る前に止める。
 """
 
 import json
@@ -15,7 +16,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import numpy as np
 
-import openarm_config  # noqa: F401  register_modality_config(NEW_EMBODIMENT)・カメラは OPENARM_CAMERAS
+import openarm_config  # noqa: F401  register_modality_config(NEW_EMBODIMENT)・カメラは OPENARM_CAMERAS／レイアウトは OPENARM_EMBODIMENT
+import openarm_layout
 from gr00t.configs.data.embodiment_configs import MODALITY_CONFIGS
 from gr00t.data.dataset.sharded_single_step_dataset import (
     ShardedSingleStepDataset,
@@ -31,17 +33,53 @@ tag = EmbodimentTag.NEW_EMBODIMENT
 _mod = os.path.join(DS, "meta", "modality.json")
 if not os.path.isfile(_mod):
     sys.exit(f"[FAIL] {_mod} が無い。gen_modality_json.py で生成する")
-_ds_cams = list(json.load(open(_mod, encoding="utf-8")).get("video", {}).keys())
+_mod_data = json.load(open(_mod, encoding="utf-8"))
+_ds_cams = list(_mod_data.get("video", {}).keys())
 if _ds_cams != list(openarm_config.CAMERAS):
     sys.exit(
         f"[FAIL] カメラ構成の不一致: config={openarm_config.CAMERAS} / dataset={_ds_cams}\n"
         f"       OPENARM_CAMERAS={','.join(_ds_cams)} を付けて実行するか、gen_modality_json.py でデータセット側を作り直す"
     )
 print("[0] cameras match:", _ds_cams)
+
+# [0b] config（OPENARM_EMBODIMENT）とデータセット側（modality.json のキー順・start/end、
+#      info.json の observation.state names）の embodiment（単腕/両腕）が一致しているか
+_ds_state_keys = list(_mod_data.get("state", {}).keys())
+_ds_action_keys = list(_mod_data.get("action", {}).keys())
+_expected_slices = openarm_layout.group_slices(openarm_config.LAYOUT)
+_ds_slices_state = {k: (v["start"], v["end"]) for k, v in _mod_data.get("state", {}).items()}
+_ds_slices_action = {k: (v["start"], v["end"]) for k, v in _mod_data.get("action", {}).items()}
+if (
+    _ds_state_keys != openarm_config.KEYS
+    or _ds_action_keys != openarm_config.KEYS
+    or _ds_slices_state != _expected_slices
+    or _ds_slices_action != _expected_slices
+):
+    try:
+        _detected = openarm_layout.detect_layout(DS)
+    except Exception as e:  # noqa: BLE001  自動判定に失敗してもメッセージは出す
+        _detected = f"<detect_layout failed: {e}>"
+    sys.exit(
+        f"[FAIL] embodiment 不一致: config={openarm_config.LAYOUT}/{openarm_config.KEYS} "
+        f"dataset state={_ds_state_keys} action={_ds_action_keys}\n"
+        f"       OPENARM_EMBODIMENT={_detected} を付けて実行するか、gen_modality_json.py でデータセット側を作り直す"
+    )
+_info = os.path.join(DS, "meta", "info.json")
+if os.path.isfile(_info):
+    _state_names_ds = (
+        json.load(open(_info, encoding="utf-8")).get("features", {}).get("observation.state", {}).get("names", [])
+    )
+    if list(_state_names_ds) and list(_state_names_ds) != openarm_config.STATE_NAMES:
+        sys.exit(
+            f"[FAIL] observation.state の names が config と不一致: config={openarm_config.STATE_NAMES} "
+            f"dataset={_state_names_ds}"
+        )
+print("[0b] embodiment match:", openarm_config.LAYOUT, openarm_config.KEYS)
+
 mc = MODALITY_CONFIGS[tag.value]
 print("[1] registered modality keys:", list(mc.keys()))
 
-print("[2] generate_stats + generate_rel_stats (rel stats exercises modality.json via RELATIVE single_arm)")
+print("[2] generate_stats + generate_rel_stats (rel stats exercises modality.json via RELATIVE な腕キー)")
 generate_stats(DS)
 generate_rel_stats(DS, tag)
 

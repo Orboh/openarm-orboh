@@ -9,13 +9,20 @@
 
 カメラ構成が違えば入力次元が違う「別モデル」になる。学習に使うデータセットの
 meta/modality.json と必ず一致させる（不一致は check_dataloader.py が検出する）。
+
+state/action は layout で 8 / 16 次元（単腕/両腕。正本は openarm_layout.py の OPENARM_EMBODIMENT）。
 """
 
 from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from openarm_layout import DEFAULT_LAYOUT, build_state_action  # noqa: E402
 
 ENV_VAR = "OPENARM_CAMERAS"
 DEFAULT_CAMERAS = "chest,wrist_right"
@@ -48,17 +55,12 @@ def detect_cameras(dataset_root: str | Path) -> list[str]:
     return cams
 
 
-def build_modality(cameras: list[str]) -> dict:
-    """GR00T の meta/modality.json（単腕 8DoF・関節7＋グリッパ1）を組み立てる。"""
+def build_modality(cameras: list[str], layout: str = DEFAULT_LAYOUT) -> dict:
+    """GR00T の meta/modality.json を組み立てる（state/action は layout で 8 / 16 次元）。"""
+    state_action = build_state_action(layout)
     return {
-        "state": {
-            "single_arm": {"start": 0, "end": 7},
-            "gripper": {"start": 7, "end": 8},
-        },
-        "action": {
-            "single_arm": {"start": 0, "end": 7},
-            "gripper": {"start": 7, "end": 8},
-        },
+        "state": state_action["state"],
+        "action": state_action["action"],
         "video": {c: {"original_key": f"{IMAGE_PREFIX}{c}"} for c in cameras},
         "annotation": {"human.task_description": {"original_key": "task_index"}},
     }

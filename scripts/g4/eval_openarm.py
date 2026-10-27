@@ -2,12 +2,18 @@
 """
 eval_openarm.py — GR00T N1.7 推論 → OpenArm 実機ブリッジ（G4）
 
+**両腕経路は 2026-09-21 時点で実機未検証。初回は必ず安全プロトコル §3 の Ctrl-C→torque disable
+検証を 1 回踏む（--dry_run=true で connect→両腕整列→Ctrl-C→両腕脱力の目視まで）。**
+
 `gr00t/eval/real_robot/SO100/eval_so100.py` を雛形に、OpenArm（7関節＋グリッパ＝8次元）用へ
 置き換えたもの。差分の要点は以下3つ:
 
   1. **8次元化**: SO100 は 5関節＋グリッパ＝6次元。OpenArm は joint_1..7 + gripper = 8次元。
      modality.json の分割（single_arm 0:7 / gripper 7:8）と一致させる。
-  2. **カメラ1本**: SO100 は front+wrist の2本。OpenArm は chest 単眼のみ。
+     両腕（bi_openarm_follower）は 16 次元（右 8 → 左 8 の順・契約 BIMANUAL_STATE_KEYS）で、
+     modality.json の分割は right_arm 0:7 / right_gripper 7:8 / left_arm 8:15 / left_gripper 15:16。
+  2. **カメラ1本**: SO100 は front+wrist の2本。OpenArm 単腕は chest 単眼のみ。
+     両腕は chest + wrist_right の 2 本（--robot.cameras の挿入順を video キー順にする）。
   3. **安全機構の追加（本ファイルの主目的）**: 雛形は `while True` の無限ループで
      try/finally も signal handler も無く、Ctrl-C で torque disable が走らない。
      安全プロトコル TODO#2「rollout の停止は未定義」の実体がこれ。本実装では
@@ -28,8 +34,21 @@ eval_openarm.py — GR00T N1.7 推論 → OpenArm 実機ブリッジ（G4）
         --robot.id=follower_right \
         --robot.cameras='{"chest": {"type": "intelrealsense", "serial_number_or_name": "344422070898", "width": 640, "height": 480, "fps": 30}}' \
         --robot.max_relative_target=3 \
+        --lang_instruction="Pick up the bottle and place it in the bin" \
         --max-steps=200 \
         --dry-run=true          # ← 初回は必ず dry-run で軌道を目視してから外す
+    # --lang_instruction は必須（収集時の single_task と同じ文。2026-09-08 から既定値なし）
+
+両腕（bi_openarm_follower。max_relative_target は **腕ごと** に 8 キーで渡す。
+top-level --robot.max_relative_target は BiOpenArmFollowerConfig に存在しない）:
+    python eval_openarm.py --robot.type=bi_openarm_follower \
+        --robot.left_arm_config.port=can_fol_l --robot.left_arm_config.side=left \
+        --robot.right_arm_config.port=can_fol_r --robot.right_arm_config.side=right \
+        --robot.id=follower \
+        --robot.cameras='{"chest": {"type": "intelrealsense", "serial_number_or_name": "344422070898", "width": 640, "height": 480, "fps": 30}, "wrist_right": {"type": "intelrealsense", "serial_number_or_name": "352122273417", "width": 640, "height": 480, "fps": 30}}' \
+        --robot.left_arm_config.max_relative_target='{joint_1: 2.5, joint_2: 2.5, joint_3: 3.0, joint_4: 5.0, joint_5: 5.0, joint_6: 4.0, joint_7: 5.0, gripper: 15.0}' \
+        --robot.right_arm_config.max_relative_target='{joint_1: 2.5, joint_2: 2.5, joint_3: 3.0, joint_4: 5.0, joint_5: 5.0, joint_6: 4.0, joint_7: 5.0, gripper: 15.0}' \
+        --dry_run=true --log_obs_every_step=false
 """
 
 import csv
@@ -53,6 +72,9 @@ from lerobot.robots import (  # noqa: F401
     RobotConfig,
     make_robot_from_config,
     openarm_follower,
+    # draccus の choice `bi_openarm_follower` は config_bi_openarm_follower.py の
+    # register_subclass が import 時に走って初めて登録される（lerobot_record.py も同じ import をしている）。
+    bi_openarm_follower,
 )
 
 # カメラ実装は import して初めて draccus の choice registry に登録される。
@@ -182,49 +204,64 @@ def recursive_add_extra_dim(obs: Dict) -> Dict:
     return out
 
 
+# =============================================================================
+# state/action のレイアウト（単腕 8 次元 / 両腕 16 次元）
+# =============================================================================
+# 収集データ meta/info.json の features names と完全一致させること。
+# ここがずれると学習時と推論時で関節の対応が入れ替わり、危険な挙動になる。
+#
+# gr00t/openarm_embodiment/openarm_layout.py の LAYOUTS と同一であること
+# （別 venv なので import せず複製。検証 3 で突合）。
+ARM_MOTOR_NAMES = ["joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6", "joint_7", "gripper"]
+
+SINGLE_STATE_KEYS = [f"{m}.pos" for m in ARM_MOTOR_NAMES]
+
+# 両腕は右 8 → 左 8 の順（BiOpenArmFollower._motors_ft が right_* を先に並べ、
+# lerobot_record.py は robot.observation_features / action_features からそのまま
+# dataset features を組むため。teleop 側の left 先順は dataset の並びに影響しない）。
+BIMANUAL_STATE_KEYS = [f"right_{m}.pos" for m in ARM_MOTOR_NAMES] + [f"left_{m}.pos" for m in ARM_MOTOR_NAMES]
+
+# modality.json の state/action 分割（(modality_key, start, end)）。
+# PolicyServer が返す action チャンクのキー名は modality config の action.modality_keys
+# そのものなので、ここが modality.json と食い違うと decode で KeyError になる。
+SINGLE_GROUPS = [("single_arm", 0, 7), ("gripper", 7, 8)]
+BIMANUAL_GROUPS = [
+    ("right_arm", 0, 7),
+    ("right_gripper", 7, 8),
+    ("left_arm", 8, 15),
+    ("left_gripper", 15, 16),
+]
+
+
 class OpenArmAdapter:
     """
     Raw robot observation ↔ GR00T VLA 入出力の変換器。
 
     SO100Adapter との差分:
-      - robot_state_keys が 8 個（joint_1..7 + gripper）
-      - camera_keys が chest 単眼
-      - state 分割が [:7] / [7:8]（modality.json の single_arm 0:7 / gripper 7:8 と一致）
+      - robot_state_keys が single: 8 個（joint_1..7 + gripper）/ bimanual: 16 個（契約 BIMANUAL_STATE_KEYS・右→左）
+      - camera_keys が single: chest 単眼 / bimanual: --robot.cameras の挿入順（既定 chest + wrist_right）
+      - state 分割が single: [:7] / [7:8]（modality.json の single_arm 0:7 / gripper 7:8 と一致）
+        bimanual: right_arm 0:7 / right_gripper 7:8 / left_arm 8:15 / left_gripper 15:16
     """
 
-    # 収集データ meta/info.json の features names と完全一致させること。
-    # ここがずれると学習時と推論時で関節の対応が入れ替わり、危険な挙動になる。
-    ROBOT_STATE_KEYS = [
-        "joint_1.pos",
-        "joint_2.pos",
-        "joint_3.pos",
-        "joint_4.pos",
-        "joint_5.pos",
-        "joint_6.pos",
-        "joint_7.pos",
-        "gripper.pos",
-    ]
-    # 既定値（フォールバック）。実際に使うカメラ集合は __init__ の camera_keys で
-    # 上書きする——2026-09-11 実測: chest 単眼 bottle モデル用にハードコードされて
-    # いたため、chest+wrist_right の2カメラを要求する tape モデルで
-    # 「Video key 'wrist_right' must be in observation」が発生した
-    # （gr00t/openarm_embodiment/openarm_config.py の modality_keys=["chest","wrist_right"]
-    #  と突き合わせ済み）。`--robot.cameras=...` で実際に接続したカメラ集合と必ず一致させること。
+    # 単腕の既定（クラス属性は後方互換のため残す。インスタンスは self.robot_state_keys / self.camera_keys を使う）。
+    ROBOT_STATE_KEYS = SINGLE_STATE_KEYS
     CAMERA_KEYS = ["chest"]
 
-    def __init__(self, policy_client: PolicyClient, camera_keys: List[str] | None = None):
+    def __init__(self, policy_client: PolicyClient, bimanual: bool = False,
+                 camera_keys: list[str] | None = None):
         self.policy = policy_client
-        self.CAMERA_KEYS = list(camera_keys) if camera_keys else list(type(self).CAMERA_KEYS)
+        self.bimanual = bimanual
+        self.robot_state_keys = list(BIMANUAL_STATE_KEYS if bimanual else SINGLE_STATE_KEYS)
+        self.groups = list(BIMANUAL_GROUPS if bimanual else SINGLE_GROUPS)
+        self.camera_keys = list(camera_keys) if camera_keys is not None else list(self.CAMERA_KEYS)
 
     def obs_to_policy_inputs(self, obs: Dict[str, Any]) -> Dict:
         model_obs = {}
-        model_obs["video"] = {k: obs[k] for k in self.CAMERA_KEYS}
+        model_obs["video"] = {k: obs[k] for k in self.camera_keys}
 
-        state = np.array([obs[k] for k in self.ROBOT_STATE_KEYS], dtype=np.float32)
-        model_obs["state"] = {
-            "single_arm": state[:7],  # (7,)
-            "gripper": state[7:8],  # (1,)
-        }
+        state = np.array([obs[k] for k in self.robot_state_keys], dtype=np.float32)
+        model_obs["state"] = {key: state[s:e] for key, s, e in self.groups}
         model_obs["language"] = {"annotation.human.task_description": obs["lang"]}
 
         model_obs = recursive_add_extra_dim(model_obs)
@@ -232,11 +269,16 @@ class OpenArmAdapter:
         return model_obs
 
     def decode_action_chunk(self, chunk: Dict, t: int) -> Dict[str, float]:
-        """chunk["single_arm"]: (B, T, 7) / chunk["gripper"]: (B, T, 1) → モータ指令 dict"""
-        single_arm = chunk["single_arm"][0][t]  # (7,)
-        gripper = chunk["gripper"][0][t]  # (1,)
-        full = np.concatenate([single_arm, gripper], axis=0)  # (8,)
-        return {name: float(full[i]) for i, name in enumerate(self.ROBOT_STATE_KEYS)}
+        """chunk[<modality_key>]: (B, T, D) を groups の順で concat → モータ指令 dict
+
+        single: single_arm (B,T,7) + gripper (B,T,1) → 8 キー
+        bimanual: right_arm (B,T,7) + right_gripper (B,T,1) + left_arm (B,T,7) + left_gripper (B,T,1) → 16 キー
+        """
+        full = np.concatenate([np.asarray(chunk[key][0][t]).reshape(-1) for key, _, _ in self.groups])
+        assert full.shape[0] == len(self.robot_state_keys), (
+            f"action 次元 {full.shape[0]} != state キー数 {len(self.robot_state_keys)}（modality.json と不一致）"
+        )
+        return {name: float(full[i]) for i, name in enumerate(self.robot_state_keys)}
 
     def get_action(self, obs: Dict) -> List[Dict[str, float]]:
         model_input = self.obs_to_policy_inputs(obs)
@@ -256,8 +298,12 @@ class EvalConfig:
     # 初回は短くして「予測が外れても長く走り続けない」ようにする。
     action_horizon: int = 8
 
-    # 収集時の single_task と完全に一致させること（学習時の言語条件と揃える）
-    lang_instruction: str = "Pick up the bottle and place it in the bin"
+    # 収集時の single_task と完全に一致させること（学習時の言語条件と揃える）。
+    # 2026-09-08: 既定値（ボトル用の文）を廃止して**必須**にした。既定値に頼ると別タスクの
+    # モデルを回しても指示文がボトル用のまま送られる（実測: ボトル 13 本・テープ 13 本の
+    # 全 rollout が同一の既定文だった。テープは収集時 "vinyl tape"・推論時 "bottle"）。
+    # タスクごとに --lang_instruction="<収集時の single_task と同じ文>" を必ず渡す。
+    lang_instruction: str | None = None
 
     fps: int = 30
     max_steps: int = 200  # 無限ループを避ける（雛形の while True を廃止）
@@ -273,6 +319,14 @@ class EvalConfig:
 
     # A-2 の接続前チェックを飛ばす（自動化時のみ。実機を人が見ていない状況では使わない）
     skip_pose_confirm: bool = False
+    # カメラを開くのを「両腕の整列が終わってから」に遅らせる（2026-09-24 板橋 v2）。
+    # 右腕をカメラ役にした構成では、右腕が経由地を通って整列する大きな動きで右 wrist の
+    # ケーブルが引かれ、USB から一時的に抜ける（整列 8 回中 5 回・腕が止まると 10 秒前後で
+    # 自分から再列挙する）。整列中にカメラを開いていると、その脱落で最初の観測が古い画像になり
+    # 方策が 1 step も動かずに止まる。true にすると、整列後に RealSense のシリアルが USB 上に
+    # 見えるまで camera_wait_s 秒待ってから開く。既定 false（従来どおり connect() 内で開く）。
+    defer_camera_connect: bool = False
+    camera_wait_s: float = 30.0
 
     # 運転時のカメラ画像を定期保存する（学習分布との突き合わせ用）。
     # 2026-07-22 に「運転時の画像が学習分布から外れていたか」を後から検証できず、
@@ -285,6 +339,11 @@ class EvalConfig:
     # 既定（horizon=8・every=25）では **200 step に1枚**——1回の実行で画像が
     # ほぼ残らなかった。チャンク数で数えるよう改めた。
     frame_log_every: int = 1
+    # chest 以外のカメラ（手首）も保存する（2026-09-24 板橋 v2）。chest は従来どおり
+    # frame_log_dir に .npy（convert_trajlog_to_lerobot.py の入力）、それ以外は同じ実行フォルダの
+    # frames_<camera>/frame_<step>.jpg（JPEG q90）。書き込みは別スレッドで行い制御ループを待たせない。
+    # 既定 false（従来どおり chest のみ）。
+    save_wrist_frames: bool = False
 
     # 毎ステップの関節角を CSV に記録する（実行どうしを数値で比較するため）。
     # クランプ警告からしか関節角を読めなかった問題への対処——クランプが発動しなくなると
@@ -310,7 +369,96 @@ class EvalConfig:
     # 明示的に trajectory_log / frame_log_dir を渡した場合はそちらを優先する。
     run_dir: str | None = None
 
+    # policy に渡す video キー（カンマ区切り）。None のとき single は ["chest"]（従来どおり）、
+    # bimanual は --robot.cameras の挿入順（既定 chest,wrist_right）。
+    # modality.json の video キーと一致させること。
+    camera_keys: str | None = None
+
     play_sounds: bool = False
+
+
+def _arm_only_deviation(dev_all: Dict[str, float]) -> Dict[str, float]:
+    """B-1 ゲート用: gripper（単腕 1 本 / 両腕 2 本）を除いた腕関節の乖離だけを返す。
+
+    判定は lerobot_record.py の verify_pose と同じ `"gripper" not in k`。
+    """
+    return {k: v for k, v in dev_all.items() if "gripper" not in k}
+
+
+def _check_max_relative_target(robot_cfg, fps: int, bimanual: bool) -> dict:
+    """max_relative_target の事前チェック（実機を繋ぐ前に落とす）。
+
+    戻り値は検証・ログ用の view（single: {"max_relative_target": float|dict}、
+    bimanual: prefix 付き 16 キー {"left_joint_1": ..., "right_gripper": ...}）。
+    **robot には渡さない**——BiOpenArmFollowerConfig に top-level max_relative_target は無く、
+    腕側 ensure_safe_goal_position（robots/utils.py L98-100）は goal と完全一致の 8 キー dict を要求し、
+    BiOpenArmFollower.send_action は prefix を剥いだ 8 キーを各腕に渡す（L203-213）ため、
+    16 キー prefix 付き dict を受け取る経路は存在しない。CLI は腕ごとに 8 キーで渡す。
+    """
+    def _check_one(max_rel, label: str, example: str) -> None:
+        if max_rel is None:
+            raise SystemExit(
+                f"{label} が未設定。1ステップの移動量が無制限になり危険なので中止する。\n"
+                f"  {example} のように必ず指定すること（安全プロトコル §0）。"
+            )
+        # B-2: lerobot の ensure_safe_goal_position は `isinstance(max_relative_target, float)`
+        # で分岐する（robots/utils.py L96）。**int を渡すと `raise TypeError` でクラッシュする**（2026-07-22 実コードで確認・素通りではなく fail-safe 側）。実機接続後に無用な例外を踏まないよう、
+        # 小数であることをここで強制する（無用な TypeError を実機接続後に踏まない）。
+        if not isinstance(max_rel, (float, dict)):
+            raise SystemExit(
+                f"{label} が float でない（{type(max_rel).__name__}: {max_rel}）。\n"
+                "  lerobot 側は isinstance(x, float) で判定するため int だとクランプが効かない。\n"
+                f"  {example} のように**小数**で指定すること。"
+            )
+
+    if not bimanual:
+        max_rel = getattr(robot_cfg, "max_relative_target", None)
+        _check_one(max_rel, "max_relative_target", "--robot.max_relative_target=1.0")
+        # 1 step あたりの上限 × fps ＝ 最大角速度。誤った目標へ向かった場合の到達速度になる。
+        if isinstance(max_rel, float):
+            logging.info(
+                f"max_relative_target = {max_rel}（1ステップ上限）→ 最大 約{max_rel * fps:.0f}/s。"
+                "初回実駆動は 1.0 程度まで落とすこと（レビュー B-2）。"
+            )
+        else:
+            logging.info(f"max_relative_target = {max_rel}（関節ごと指定）")
+        return {"max_relative_target": max_rel}
+
+    # --- bimanual: 腕ごとに検証し、16 キー prefix 付きの view に合成する ---
+    example = (
+        "--robot.left_arm_config.max_relative_target=1.0 または "
+        "--robot.right_arm_config.max_relative_target="
+        "{joint_1: 2.5, joint_2: 2.5, joint_3: 3.0, joint_4: 5.0, joint_5: 5.0, joint_6: 4.0, joint_7: 5.0, gripper: 15.0}"
+        "（左右それぞれに指定する）"
+    )
+    view: dict = {}
+    for side, arm in (("left", robot_cfg.left_arm_config), ("right", robot_cfg.right_arm_config)):
+        max_rel = getattr(arm, "max_relative_target", None)
+        _check_one(max_rel, f"--robot.{side}_arm_config.max_relative_target", example)
+        if isinstance(max_rel, dict):
+            # ensure_safe_goal_position は goal（prefix 剥がし済み 8 キー）と key set の完全一致を要求する。
+            if set(max_rel.keys()) != set(ARM_MOTOR_NAMES):
+                raise SystemExit(
+                    f"--robot.{side}_arm_config.max_relative_target の dict キーが 8 モータと一致しない。\n"
+                    f"  期待: {ARM_MOTOR_NAMES}\n  実際: {sorted(max_rel.keys())}\n"
+                    "  lerobot の ensure_safe_goal_position は goal と完全一致の key set を要求する（不一致は ValueError）。"
+                )
+            for k in ARM_MOTOR_NAMES:
+                v = max_rel[k]
+                if not isinstance(v, float):
+                    raise SystemExit(
+                        f"--robot.{side}_arm_config.max_relative_target[{k}] が float でない（{type(v).__name__}: {v}）。小数で指定すること。"
+                    )
+                view[f"{side}_{k}"] = v
+            logging.info(f"{side} max_relative_target = {max_rel}（関節ごと指定）")
+        else:
+            for k in ARM_MOTOR_NAMES:
+                view[f"{side}_{k}"] = max_rel
+            logging.info(
+                f"{side} max_relative_target = {max_rel}（1ステップ上限）→ 最大 約{max_rel * fps:.0f}/s。"
+                "初回実駆動は 1.0 程度まで落とすこと（レビュー B-2）。"
+            )
+    return view
 
 
 class SafeRunner:
@@ -349,6 +497,23 @@ class SafeRunner:
     def should_stop(self) -> bool:
         return self._stopping
 
+    def _buses(self) -> list[tuple[str, Any]]:
+        """torque disable を直接叩く bus の一覧。
+
+        単腕 OpenArmFollower は robot.bus 1 本。BiOpenArmFollower には bus 属性が無く
+        left_arm.bus / right_arm.bus（実行確認済み）なので腕ごとに列挙する。
+        """
+        bus = getattr(self.robot, "bus", None)
+        if bus is not None:
+            return [("arm", bus)]
+        out: list[tuple[str, Any]] = []
+        for side in ("left", "right"):
+            arm = getattr(self.robot, f"{side}_arm", None)
+            arm_bus = getattr(arm, "bus", None) if arm is not None else None
+            if arm_bus is not None:
+                out.append((side, arm_bus))
+        return out
+
     def shutdown(self):
         """
         必ず呼ばれる後片付け。
@@ -362,18 +527,22 @@ class SafeRunner:
         """
         disable_ok = False
 
-        # (1) まず torque disable を明示的に試み、成否を自分で把握する
-        bus = getattr(self.robot, "bus", None)
-        if bus is not None:
-            try:
-                bus.disable_torque()
-                disable_ok = True
-                logging.info("torque disable 成功")
-            except Exception as e:
-                logging.error(
-                    f"**torque disable に失敗した（{type(e).__name__}: {e}）。"
-                    "error latch の可能性がある。直ちに power cycle（DC PSU OFF→10秒→ON）を行うこと。**"
-                )
+        # (1) まず torque disable を明示的に試み、成否を自分で把握する（bus ごとに個別にログ・全 bus 成功で OK）
+        buses = self._buses()
+        if buses:
+            results = []
+            for name, bus in buses:
+                try:
+                    bus.disable_torque()
+                    results.append(True)
+                    logging.info(f"torque disable 成功（{name}）")
+                except Exception as e:
+                    results.append(False)
+                    logging.error(
+                        f"**torque disable に失敗した（{name}: {type(e).__name__}: {e}）。"
+                        "error latch の可能性がある。直ちに power cycle（DC PSU OFF→10秒→ON）を行うこと。**"
+                    )
+            disable_ok = all(results)
         else:
             logging.warning("bus が取得できず torque disable を明示実行できなかった")
 
@@ -384,8 +553,10 @@ class SafeRunner:
                 self.robot.disconnect()
             else:
                 logging.warning("接続が未完了のまま終了する。腕の脱力を必ず目視確認すること。")
-                if bus is not None and getattr(bus, "is_connected", False):
-                    bus.disconnect(disable_torque=True)
+                for name, bus in buses:
+                    if getattr(bus, "is_connected", False):
+                        logging.info(f"未接続のまま bus.disconnect(disable_torque=True)（{name}）")
+                        bus.disconnect(disable_torque=True)
         except Exception:
             logging.exception(
                 "disconnect に失敗した。**直ちに power cycle（DC PSU OFF→10秒→ON）を行うこと。**"
@@ -402,6 +573,88 @@ class SafeRunner:
                     "**torque が落ちた確証が無い状態で終了する。腕に触れる前に脱力を確認し、"
                     "疑わしければ power cycle すること。放置は過熱リスクのため厳禁。**"
                 )
+
+
+def _write_jpeg(img, path: str) -> None:
+    """RGB 画像を JPEG で書く（手首カメラの保存用・別スレッドから呼ぶ）。"""
+    import cv2
+
+    cv2.imwrite(path, cv2.cvtColor(img, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, 90])
+
+
+def _stash_cameras(robot) -> list:
+    """各腕のカメラを一時的に外し、connect() でカメラを開かせない（defer_camera_connect 用）。
+
+    OpenArmFollower.connect() は self.cameras を順に開き、get_observation() も同じ dict を読む。
+    両腕版は左右の腕へ委譲するだけなので、腕ごとの dict を空にして戻せば済む。
+    """
+    arms = [robot.left_arm, robot.right_arm] if hasattr(robot, "left_arm") else [robot]
+    stash = []
+    for arm in arms:
+        stash.append((arm, dict(arm.cameras)))
+        arm.cameras = {}
+    return stash
+
+
+def _realsense_serials() -> set:
+    """USB 上に見えている RealSense のシリアル一覧。取得に失敗したら例外をそのまま上げる。"""
+    import pyrealsense2 as rs
+
+    return {d.get_info(rs.camera_info.serial_number) for d in rs.context().query_devices()}
+
+
+def _connect_stashed_cameras(stash: list, wait_s: float) -> None:
+    """整列が終わったあとにカメラを開いて腕へ戻す。
+
+    1. **まだどのカメラも開いていない時点で**、必要な RealSense のシリアルが全部 USB 上に
+       見えるまで最大 wait_s 秒待つ。開いて映像を流し始めたあとに一覧を取り直すと、取得が
+       失敗して見えているカメラまで「無い」扱いになる（2026-09-24 r4 で実際に起きた。
+       1 台ずつ開きながら探す初版の誤り）
+    2. 揃ったら全カメラを続けて開く。開けたカメラだけを腕へ戻すので、途中で失敗しても
+       disconnect() が開いていないカメラを閉じに行かない
+    """
+    needed = {}
+    for _arm, cams in stash:
+        for key, cam in cams.items():
+            serial = getattr(getattr(cam, "config", None), "serial_number_or_name", None)
+            if type(cam).__name__ == "RealSenseCamera" and serial:
+                needed[str(serial)] = key
+    if needed:
+        t0 = time.time()
+        first_missing = None
+        last_err = None
+        while True:
+            try:
+                present = _realsense_serials()
+                last_err = None
+            except Exception as e:  # 取得の失敗は握りつぶさずに記録して待ち続ける
+                present = set()
+                if last_err is None:
+                    logging.warning(f"RealSense の一覧取得に失敗した（待ち続ける）: {e}")
+                last_err = e
+            missing = [s for s in needed if s not in present]
+            if first_missing is None:
+                first_missing = list(missing)
+            if not missing:
+                break
+            if time.time() - t0 > wait_s:
+                names = ", ".join(f"{needed[s]}（{s}）" for s in missing)
+                cause = f"。最後の一覧取得エラー: {last_err}" if last_err else ""
+                raise ConnectionError(
+                    f"カメラ {names} が {wait_s:.0f} 秒待っても USB 上に現れない。ケーブルの抜けを確認すること{cause}"
+                )
+            time.sleep(0.5)
+        if first_missing:
+            names = ", ".join(f"{needed[s]}（{s}）" for s in first_missing)
+            logging.warning(
+                f"カメラ {names} は整列の直後には USB 上に無く、{time.time() - t0:.1f} 秒後に揃った"
+                "（整列の動きでケーブルが引かれて一時的に抜けていた可能性）"
+            )
+    for arm, cams in stash:
+        for key, cam in cams.items():
+            cam.connect()
+            arm.cameras[key] = cam
+            logging.info(f"カメラ {key} を整列後に開いた")
 
 
 @draccus.wrap()
@@ -427,32 +680,41 @@ def eval(cfg: EvalConfig):
     # asdict ログは run_dir 展開の後に置く＝確定した traj/frame パスも記録に残す
     logging.info(pformat(asdict(cfg)))
 
-    # --- 安全設定の事前チェック（実機を繋ぐ前に落とす） ---
-    max_rel = getattr(cfg.robot, "max_relative_target", None)
-    if max_rel is None:
-        raise SystemExit(
-            "max_relative_target が未設定。1ステップの移動量が無制限になり危険なので中止する。\n"
-            "  --robot.max_relative_target=1.0 のように必ず指定すること（安全プロトコル §0）。"
-        )
-
-    # B-2: lerobot の ensure_safe_goal_position は `isinstance(max_relative_target, float)`
-    # で分岐する（robots/utils.py L96）。**int を渡すと `raise TypeError` でクラッシュする**（2026-07-22 実コードで確認・素通りではなく fail-safe 側）。実機接続後に無用な例外を踏まないよう、
-    # 小数であることをここで強制する（無用な TypeError を実機接続後に踏まない）。
-    if not isinstance(max_rel, (float, dict)):
-        raise SystemExit(
-            f"max_relative_target が float でない（{type(max_rel).__name__}: {max_rel}）。\n"
-            "  lerobot 側は isinstance(x, float) で判定するため int だとクランプが効かない。\n"
-            "  --robot.max_relative_target=1.0 のように**小数**で指定すること。"
-        )
-
-    # 1 step あたりの上限 × fps ＝ 最大角速度。誤った目標へ向かった場合の到達速度になる。
-    if isinstance(max_rel, float):
-        logging.info(
-            f"max_relative_target = {max_rel}（1ステップ上限）→ 最大 約{max_rel * cfg.fps:.0f}/s。"
-            "初回実駆動は 1.0 程度まで落とすこと（レビュー B-2）。"
-        )
+    # --- 単腕 / 両腕のレイアウト決定（安全チェックの前に確定させる）---
+    # RobotConfig.type は draccus ChoiceRegistry のプロパティ（make_robot_from_config が使う）。文字列比較で分岐する。
+    bimanual = cfg.robot.type == "bi_openarm_follower"
+    state_keys = BIMANUAL_STATE_KEYS if bimanual else SINGLE_STATE_KEYS
+    if cfg.camera_keys:
+        camera_keys = [k.strip() for k in cfg.camera_keys.split(",") if k.strip()]
+    elif bimanual:
+        # --robot.cameras の挿入順（draccus parse で ['chest', 'wrist_right'] になることを確認済み）
+        camera_keys = list(cfg.robot.cameras.keys())
+        if not camera_keys:
+            raise SystemExit("bimanual は --robot.cameras に chest と wrist_right を渡す（video キーが空）。")
     else:
-        logging.info(f"max_relative_target = {max_rel}（関節ごと指定）")
+        camera_keys = list(OpenArmAdapter.CAMERA_KEYS)
+    logging.info(
+        f"layout = {'bimanual' if bimanual else 'single'}（state {len(state_keys)} 次元）/ camera_keys = {camera_keys}"
+    )
+    if bimanual:
+        logging.warning(
+            "=== 両腕経路は 2026-09-21 時点で実機未検証。初回は --dry_run=true で "
+            "connect→両腕整列→Ctrl-C→両腕脱力の目視（安全プロトコル §3）を必ず 1 回踏むこと ==="
+        )
+
+    # --- 安全設定の事前チェック（実機を繋ぐ前に落とす） ---
+    max_rel_view = _check_max_relative_target(cfg.robot, cfg.fps, bimanual)
+    if bimanual:
+        logging.info(f"max_relative_target(16-key view) = {max_rel_view}")
+
+    # B-3: 言語指示の未指定ゲート（2026-09-08）。既定値に頼ると学習時と違う指示文で推論する
+    # 事故になる（テープ実機 13 本がボトル用の文のまま走った実例）。実機を繋ぐ前に落とす。
+    if not cfg.lang_instruction or not cfg.lang_instruction.strip():
+        raise SystemExit(
+            "lang_instruction が未指定。学習時（収集時の single_task）と同じ指示文を必ず渡すこと。\n"
+            '  例: --lang_instruction="Pick up the vinyl tape and place it in the bin"'
+        )
+    logging.info(f'lang_instruction = "{cfg.lang_instruction}"（収集時の single_task と一致していること）')
 
     if cfg.dry_run:
         logging.warning("=== DRY-RUN モード: 推論のみ実行し、実機へは指令を送らない ===")
@@ -474,15 +736,20 @@ def eval(cfg: EvalConfig):
     # どちらも max_relative_target のクランプでは防げない種類の危険。
     # さらに connect() は enable_torque() → soft_move_to_position() を実行するため、
     # **dry-run であっても通電し、腕が自動整列で実際に動く**（約2.2秒）。
+    # 両腕は BiOpenArmFollower.connect が left_arm.connect → right_arm.connect の順で各約 2.2 秒動く。
+    if bimanual:
+        _align_msg = "  接続すると通電し、約2.2秒×2腕（左→右の順に自動整列）で両腕が動く。\n"
+    else:
+        _align_msg = "  接続すると通電し、約2.2秒の自動整列動作で腕が動く。\n"
     if not cfg.skip_pose_confirm:
         try:
             input(
                 "\n"
                 "  [接続前チェック]\n"
-                "   - 腕は標準レスト姿勢か（接続時の姿勢が原点として焼き付く）\n"
+                "   - 腕が開始姿勢から遠すぎないか（接続時に開始姿勢へ自動整列する）\n"
                 "   - 可動域に人・物は無いか\n"
                 "   - DC PSU のスイッチに手が届くか（唯一確実な停止手段）\n"
-                "  接続すると通電し、約2.2秒の自動整列動作で腕が動く。\n"
+                + _align_msg +
                 "  続行する場合は ENTER、中止は Ctrl-C: "
             )
         except (EOFError, KeyboardInterrupt):
@@ -502,7 +769,7 @@ def eval(cfg: EvalConfig):
     if cfg.trajectory_log:
         traj_f = open(cfg.trajectory_log, "w", newline="")
         traj_w = csv.writer(traj_f)
-        keys = OpenArmAdapter.ROBOT_STATE_KEYS
+        keys = state_keys
         traj_w.writerow(
             ["step", "chunk_i", "t_sec"]
             + [f"present.{k}" for k in keys]
@@ -510,14 +777,27 @@ def eval(cfg: EvalConfig):
         )
         logging.info(f"軌道ログを記録する: {cfg.trajectory_log}")
 
+    wrist_pool = None
+    wrist_dirs = {}
+    if cfg.save_wrist_frames and cfg.frame_log_dir:
+        from concurrent.futures import ThreadPoolExecutor
+
+        wrist_pool = ThreadPoolExecutor(max_workers=1)
+        base = os.path.dirname(os.path.abspath(cfg.frame_log_dir))
+        for k in camera_keys[1:]:
+            wrist_dirs[k] = os.path.join(base, f"frames_{k}")
+            os.makedirs(wrist_dirs[k], exist_ok=True)
+        logging.info(f"手首カメラの画像も保存する: {list(wrist_dirs.values())}")
+
     try:
+        cam_stash = _stash_cameras(robot) if cfg.defer_camera_connect else None
         robot.connect()
+        if cam_stash is not None:
+            logging.info("両腕の整列が終わった。カメラを開く（defer_camera_connect=true）")
+            _connect_stashed_cameras(cam_stash, cfg.camera_wait_s)
         log_say("Robot connected", cfg.play_sounds, blocking=True)
 
-        # 実際に接続したカメラ集合（--robot.cameras）をそのまま使う。
-        # ハードコードすると別モデル（カメラ台数の異なる embodiment）で
-        # 「Video key '...' must be in observation」を再発する。
-        policy = OpenArmAdapter(policy_client, camera_keys=list(cfg.robot.cameras.keys()))
+        policy = OpenArmAdapter(policy_client, bimanual=bimanual, camera_keys=camera_keys)
         log_say(f'Policy ready: "{cfg.lang_instruction}"', cfg.play_sounds, blocking=True)
 
         step = 0
@@ -534,10 +814,18 @@ def eval(cfg: EvalConfig):
             変換スクリプト（convert_trajlog_to_lerobot.py）はこの対応で画像と行を結ぶ。
             """
             try:
-                img = source_obs.get(policy.CAMERA_KEYS[0])
+                # camera_keys[0]（chest）だけ保存する現行仕様を維持（wrist は保存しない）
+                img = source_obs.get(camera_keys[0])
                 if img is not None:
                     os.makedirs(cfg.frame_log_dir, exist_ok=True)
                     np.save(os.path.join(cfg.frame_log_dir, f"frame_{at_step:05d}.npy"), img)
+                if wrist_pool is not None:
+                    for k, d in wrist_dirs.items():
+                        wimg = source_obs.get(k)
+                        if wimg is not None:
+                            wrist_pool.submit(
+                                _write_jpeg, np.array(wimg, copy=True), os.path.join(d, f"frame_{at_step:05d}.jpg")
+                            )
             except Exception:
                 logging.warning("フレーム保存に失敗（実行は継続する）", exc_info=False)
 
@@ -545,8 +833,8 @@ def eval(cfg: EvalConfig):
             obs = robot.get_observation()
             obs["lang"] = cfg.lang_instruction
             if first_obs is None:
-                first_obs = {k: float(obs[k]) for k in OpenArmAdapter.ROBOT_STATE_KEYS if k in obs}
-            last_obs = {k: float(obs[k]) for k in OpenArmAdapter.ROBOT_STATE_KEYS if k in obs}
+                first_obs = {k: float(obs[k]) for k in state_keys if k in obs}
+            last_obs = {k: float(obs[k]) for k in state_keys if k in obs}
 
             log_this_chunk = bool(cfg.frame_log_dir) and chunk_idx % cfg.frame_log_every == 0
             if log_this_chunk:
@@ -567,12 +855,16 @@ def eval(cfg: EvalConfig):
                 # 座標系のずれとは無関係に閾値へ迫るため。腕の関節だけで判定すれば
                 # RELATIVE/ABSOLUTE の取り違えもフレームずれも検出できる
                 # （実測: 取り違えが無ければ関節の乖離は 0.03〜0.29 度に収まる）。
+                # 判定は lerobot_record.py L614 と同じ `"gripper" not in k`（両腕では
+                # right_gripper.pos / left_gripper.pos の gripper 2 本を除外する。
+                # startswith("gripper") だと prefix 付きキーを除外できない）。
                 dev_all = {k: abs(first[k] - float(obs[k])) for k in first if k in obs}
-                dev = {k: v for k, v in dev_all.items() if not k.startswith("gripper")}
+                dev = _arm_only_deviation(dev_all)
                 worst = max(dev.values()) if dev else 0.0
+                gripper_ref = {k: round(v, 2) for k, v in dev_all.items() if "gripper" in k}
                 logging.info(
                     f"初回指令の現在角からの乖離: 最大 {worst:.2f}（閾値 {cfg.first_action_max_dev}・腕関節のみ）"
-                    f" / gripper 参考値 {dev_all.get('gripper.pos', 0.0):.2f}"
+                    f" / gripper 参考値 {gripper_ref}"
                 )
                 if worst > cfg.first_action_max_dev:
                     raise SystemExit(
@@ -603,7 +895,7 @@ def eval(cfg: EvalConfig):
                             save_frame(log_obs, step)
 
                 if traj_w is not None:
-                    keys = OpenArmAdapter.ROBOT_STATE_KEYS
+                    keys = state_keys
                     traj_w.writerow(
                         [step, i, round(time.time() - t_start, 3)]
                         + [round(float(log_obs.get(k, float("nan"))), 4) for k in keys]
@@ -635,7 +927,7 @@ def eval(cfg: EvalConfig):
         try:
             if first_obs and last_obs:
                 logging.info("=== 関節角の変化（開始 → 終了） ===")
-                for k in OpenArmAdapter.ROBOT_STATE_KEYS:
+                for k in state_keys:
                     if k in first_obs and k in last_obs:
                         d = last_obs[k] - first_obs[k]
                         logging.info(
@@ -652,6 +944,14 @@ def eval(cfg: EvalConfig):
 
         # 正常終了・Ctrl-C・例外のどの経路でもここを通す（本実装の要点）
         runner.shutdown()
+        # 腕の脱力を先に済ませてから、手首画像の書き残しを待つ
+        if wrist_pool is not None:
+            try:
+                wrist_pool.shutdown(wait=True)
+                for k, d in wrist_dirs.items():
+                    logging.info(f"手首カメラ {k} の画像 {len(os.listdir(d))} 枚: {d}")
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":
