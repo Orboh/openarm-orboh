@@ -1,136 +1,121 @@
-# シーンプロファイル: 北九州(九工大) タケエイ仕分け汎化テスト v1 — 両腕で雑多な廃棄物を
-# 1個ずつ拾い、アームの左右どちらかへ大まかに仕分ける — 2026-10-19 起草
+# シーンプロファイル: 北九州(九工大) タケエイ仕分け 木材 レベル1 v1 — 画角内に木材 1 個だけを置き、
+# 拾って正面奥の木材用の箱へ置く — 2026-10-20 起草
 #
-# 計画の背景: 板橋(itabashi)で収集・学習した takeei-sort タスク(gr00t-bi-takeei-sort-v1)の
-# 開始姿勢セット takeei-v2 を引き継ぎ、新しい拠点(北九州・九州工業大学)で新規データを収集して
-# 新しいモデルを学習する(takeei-v2 の set.yaml に記載の計画どおり・ファイル名も指定済み)。
-# 書式の手本: scenes/itabashi-takeei-v1.yaml（板橋の先行シーン）。
+# 方針: docs/takeei-material-level-collection.md（種類 × レベル1〜4 × 50 本）。
+# 机・照明・カメラの取り付けは kitakyushu-takeei-v1（2026-10-19 実測）と同じ拠点・同じ設置を引き継ぐ。
+# 変わったのは対象物（木材 1 個のみ）・置き場（正面奥の箱）・散らし方。
 #
 # **状態: 下書き。TODO が残っている間は本番(gate/session)を起動できない（dry は SCENE=none）。**
-#
-# 板橋との違い: 対象物の種類・置き場所・散らし方を厳密に固定していない（段階 A の決め打ちでは
-# なく、もっと緩い「複数種類を1個ずつ・左右どちらかへ」という汎化寄りのタスク）。
 
-name: kitakyushu-takeei-v1
-created: 2026-10-19
-measured: 2026-10-19            # 会話内での実測(机・カメラ)。90cmへの昇降変更後の画角再確認はTODO
-task: takeei-sort-generalize     # 板橋の takeei-sort と区別する（対象物・置き場所が緩い）
+name: kitakyushu-wood-l1-v1
+created: 2026-10-20
+measured: 2026-10-20            # 箱・木材の寸法と箱の位置（Kota 実測・会話内）
+task: takeei-wood-pick-place
+material: wood
+level: 1
 note: >
-  九州工業大学(北九州)の OpenArm 両腕で、机上に積まれた雑多な廃棄物(緩衝材・ブルーシート・
-  円柱状の木材・発泡スチロール・ダンボール等)を1個ずつ拾い、アームの左右どちらか(厳密な
-  置き先は決めない)へ移すデータを録る。板橋の takeei-sort(4品目・固定順・固定置き場)とは
-  違い、対象物の種類・個数・置き場所を厳密に固定しない汎化テストという位置づけ。
-  開始姿勢・経路は takeei-v2（板橋）を引き継ぐ。キャリブレーション(bump_to_stop)時に
-  机との干渉が無いか目視確認しながら進める運用（2026-10-19 Kota 決定）。
+  九州工業大学(北九州)の OpenArm 両腕で、画角内に木材を 1 個だけ置き、それを拾って
+  ロボット正面・木材より奥に置いた木材用の箱へ入れるデータを録る（種類別 VLA の木材・レベル1）。
+  他の種類のゴミは画角に入れない。kitakyushu-takeei-v1（山から何でも拾う汎化収集）とは
+  タスクも置き場も違うので混ぜない。
 
-# --- 腕の役割（両腕とも作業。品目ごとの左右割り当ては固定しない） -----------------
+# --- 腕の役割 -------------------------------------------------------------
 arm_roles:
-  left: "作業。左側へ運ぶ物を担当（品目ごとの固定割り当てはしない。取りやすい方で拾う）"
-  right: "作業。右側へ運ぶ物を担当（同上）"
-  assignment_rule: "板橋(takeei-v2)のように品目ごとに決め打ちしない。どちらの腕で拾うかは
-    エピソードごとに操作者が自然に選ぶ（汎化テストのため固定しない・2026-10-19 Kota 決定）"
+  left: "作業（全エピソードで使う）"
+  right: "作業（全エピソードで使う）"
+  assignment_rule: "全エピソードで両腕を使う（片腕を固定しない）。拾うのは基本的に木材に近い方の腕（2026-10-20 Kota決定）"
   right_hold_method: none
-  right_pose_source: "config/pose_sets/takeei-v2/right.yaml（板橋から引き継ぎ。経由地つき）"
+  right_pose_source: "config/pose_sets/kitakyushu-takeei-v2/right.yaml（前日から引き継ぎ）"
 
-# --- 机（ロボット固定部） -----------------------------------------------------
+# --- 机（ロボット固定部）。kitakyushu-takeei-v1 と同じ（2026-10-19 実測） ---------
 robot_base:
-  mounted_on: height_adjustable_table   # ロボット自体が昇降デスクにグリップ固定されている
-  table_height_mm: 900        # 2026-10-19 実測(会話内)。当初 740mm だったが、アームのリーチが
-    # 不足したため 900mm へ変更(画角内の全ゴミに腕が届くようにするため)
-  base_plate_tip_to_table_edge_mm: 60   # 2026-10-19 実測(会話内)。グリップ幅ぶん
+  mounted_on: height_adjustable_table
+  table_height_mm: 900
+  base_plate_tip_to_table_edge_mm: 60
   base_mount: grip
   base_mount_detail: "グリップでロボット底板を昇降デスクの縁に固定"
 
 table:
   kind: height_adjustable
-  height_mm: 900               # 床から天板まで。2026-10-19 実測(会話内)。当初740mm→リーチ確保のため900mmへ変更
-  desk_preset: "90"            # 昇降テーブルの表示値（床からの高さcm。74cm時代は表示74・一致確認済み）
+  height_mm: 900
+  desk_preset: "90"
   surface: "丈夫な白いプラスチック"
   base_to_table_edge_mm: 60
   base_mount: "グリップでロボット底板を昇降デスクの縁に固定"
 
 mat:
-  present: false                # 敷かない。廃棄物は机に直接積まれている
-  kind: null
-  orientation: null
+  present: true
+  kind: "灰色のカーペット（ポリエチレン）・2026-10-20 Kota確認"
+  orientation: "木材を置く範囲（450 x 310mm）に敷く。箱より手前"   # kitakyushu-takeei-v1（マットなし）との違い
 
 lighting:
   source: "施設の常設照明のみ(変化なし・2026-10-19 Kota確認)"
   window: "窓からの採光なし(2026-10-19 Kota確認)"
   daylight_controlled: false
   daylight_recorded_at: "session layer（manifest.identity.started_local / notes.md の lighting_observed）"
-  note: "照明は常時一定とのことなので、昼夜の管理は不要と考えられる(2026-10-19時点の認識。要再確認)"
 
-# --- 対象物（複数種類の雑多な廃棄物。固定の個数・順序は無し） --------------------
+# --- 対象物（木材 1 個のみ） ------------------------------------------------
 object:
-  kind: mixed_waste_items
-  count: 25                    # 2026-10-19 Kota実機確認(約25個)
+  kind: wood
+  count: 1                      # 1 エピソードで画角内に置くのは 1 個だけ（レベル1の定義）
   description: >
-    机上に積まれた雑多な廃棄物の山。確認済みの品目: 茶色い輸送用緩衝材、青いビニールシート、
-    円柱状の木材、発泡スチロール、ダンボール。板橋のように4品目に絞らず、山にあるものを
-    そのまま使う(汎化目的)。
+    木材 3 個を使い回す（1 エピソードで画角に置くのは 1 個だけ。2026-10-20 Kota 実測）:
+    (1) 立方体 1 辺 47mm、(2) 小さい円柱 直径 46mm × 高さ 98mm、
+    (3) 二等辺三角柱 高さ 48mm・一辺 47mm。
+    大きい円柱（直径 28mm × 高さ 398mm）は使わない（2026-10-20 Kota決定）
+  pieces:
+    - {id: cube, shape: cube, size_mm: "47"}
+    - {id: cylinder_small, shape: cylinder, diameter_mm: 46, height_mm: 98}
+    - {id: triangular_prism, shape: isosceles_triangular_prism, height_mm: 48, side_mm: 47}
   fill: solid
-  orientation: "固定しない(山から自然に取れる向きで拾う)"
-  condition: "劣化しない前提・同一セットで通す想定(収集初日に要確認)"
+  orientation: "毎回ばらばら（固定しない・2026-10-20 Kota決定）"
+  condition: "同じ 3 個を通しで使う（欠け・汚れが出たらセッション層の notes.md に記録）"
 
 place_target:
-  kind: left_or_right_loose    # 厳密な置き先マーカー無し。アームの左右どちらかへ大まかに置く
-  position: "アームの左側 or 右側(大まか)"
-  position_origin: "n/a(マーカーを置かず、大まかな方向のみ指定・2026-10-19 Kota決定)"
-  markers: none
-  size_mm: n/a
+  kind: box
+  position: "ロボットの真正面・木材より奥（2026-10-20 Kota決定）"
+  position_origin: "底板の先端から箱の手前の縁まで 380mm・左右は中央（2026-10-20 Kota 実測）"
+  markers: "箱をテーブルに固定（毎回動かさない・2026-10-20 Kota）"
+  size_mm: "W320 x D215 x H130"   # 横幅 × 奥行き × 高さ（2026-10-20 Kota 実測）
 
-# --- 散らし方（山からの取り出し。固定スロットなし） ------------------------------
+# --- 散らし方（木材を置く位置） -----------------------------------------------
 scatter_policy:
-  mode: pile                   # 固定スロットではなく「山から取る」方式
-  layout: "アーム手前 約80mm(8cm)の位置に雑多な廃棄物の山(昇降デスク上)"
+  mode: free                    # マス目は使わず、範囲内で位置も向きも毎回ばらばら（2026-10-20 Kota決定）
+  layout: "横 450mm × 奥行き 310mm の範囲・左右中央・箱より手前（2026-10-20 Kota 実測）"
   cells: []
   strict: false
-  placement: "アーム正面やや手前"
-  numbering: "位置を番号で管理しない(山からランダムに取るため)"
+  placement: "箱より手前（ロボット側）"
+  numbering: "位置を番号で管理しない（free）"
   reference_mark: none
   reference_mark_position_mm: n/a
   reference_mark_origin: n/a
   reference_mark_in_camera_view: n/a
   marking: none
   cell_size_mm: n/a
-  area_mm: "机の広い範囲にまんべんなく分布(正確な寸法は未測定・2026-10-19 Kota確認)"
-  per_session: "gate 10本 → 以後50本×3セッション → 40本（合計200本・配分は現場で調整可）"
-  session_count: 4              # gate含め4セッションを想定(10+50+50+50+40=200)
+  area_mm: "450 x 310"
+  per_session: "gate 10本 → session 40本（合計50本・docs/takeei-material-level-collection.md）"
+  session_count: 2
   intentional_imbalance: none
 
 distractors:
-  present: false
+  present: false                # レベル1の定義: 他の種類の物体は画角に入れない
   items: []
 
-# --- カメラの物理位置 -------------------------------------------------------
+# --- カメラの物理位置（kitakyushu-takeei-v1 と同じ取り付け） ------------------------
 camera_mount:
   chest:
-    height_mm: 700              # OpenArm底板からの高さ(2026-10-19実測・会話内)
+    height_mm: 700
     height_ref: "OpenArm底板から、取り付けパーツ基準"
-    tilt_deg: 45                # 下向き45度(目分量・2026-10-19)
+    tilt_deg: 45
     mount_part: "自作のカメラマウント(既製品ではない)"
-    view_note: >
-      机を74cm→90cmへ上げたことで、廃棄物の山とアームのリーチの両立を狙った
-      (画角に入る範囲のみ対象物として選定する運用・2026-10-19 Kota決定)。
-      ただし90cmへの変更後の画角の最終確認(山全体が入るか)はTODO —
-      収集初日にプレビュー(rerun)で再確認すること。
+    view_note: "上部に箱全体、下半分に木材を置く範囲（灰色のカーペット）が写る（2026-10-20 dry で確認・Kota OK）"
   wrist_left:
     mount_part: "D405用手首マウント(部品名 unknown)"
-    serial: "409122272149"     # 2026-10-19 lerobot-find-cameras + 非常停止ボタンの映り込みで確認
+    serial: "409122272149"
     orientation: unknown
-    view_note: >
-      待機姿勢では機材・ケーブルを向いており山は写らないが、アームを山の方へ下げると
-      グリップ指の間に発泡スチロール・段ボール・ブルーシート・気泡緩衝材が写ることを
-      実機で確認(2026-10-19 Kota)。露出設定は右手首と同じ(exposure=8000, gain=16)を
-      全D405に適用済みで白飛び無し。
+    view_note: "露出は手動(exposure=8000, gain=16)・kitakyushu-takeei-v1 と同じ"
   wrist_right:
     mount_part: "D405用手首マウント(部品名 unknown)"
-    serial: "352122273417"     # 2026-10-19 消去法で確認(左の非常停止ボタン写り込みから)
+    serial: "352122273417"
     orientation: unknown
-    view_note: >
-      待機姿勢では機材・ケーブルを向いており山は写らないが、アームを山の方へ下げると
-      グリップ指の間に発泡スチロール・木材・段ボール・ブルーシートが写ることを実機で確認
-      (2026-10-19 Kota)。露出は自動だと白い梱包材が白飛びするため手動
-      (exposure=8000, gain=16)に変更して解消（camera_setup.py --d405-gain 16
-      --d405-exposure 8000。collect起動時に焼く運用）。
+    view_note: "露出は手動(exposure=8000, gain=16)・kitakyushu-takeei-v1 と同じ"
