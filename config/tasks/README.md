@@ -27,8 +27,13 @@
 | タスクと課題コードの一覧（viser などから読むなら `--json`） | `python3 scripts/task.py list [--json]` |
 | 収集の前の突き合わせ（食い違えば理由を並べて終了コード 1） | `python3 scripts/task.py check takeei_wood [--issue T1-L2]` |
 | 名前を出す | `python3 scripts/task.py name takeei_wood T1-L2 [--model-version 2] [--mix]` |
+| 課題コードを決める（ISSUE かタグから） | `python3 scripts/task.py issue takeei_wood [--issue T1-L2] [--tag t1-l2-s1]` |
 
-- `scripts/collect_bimanual.sh` は gate / session の前に `task.py check` を自動で呼ぶ（タスクファイルの `TASK_SLUG` に当たる `config/tasks/<TASK_SLUG>.yaml` があるときだけ。dry では呼ばない）。`ISSUE=T1-L2` を渡すと、その課題コードがこのタスクの一覧にあるかも見る
+- `scripts/collect_bimanual.sh` は gate / session の前に `task.py check` を自動で呼ぶ（タスクファイルの `TASK_SLUG` に当たる `config/tasks/<TASK_SLUG>.yaml` があるときだけ。dry では呼ばない）
+- 台帳のあるタスクの gate / session は**課題コードが必須**（2026-10-28）。`ISSUE=T1-L2` があればそれ、無ければ session のタグから読む（`t1-l2-s1` → `T1-L2`・`t2-s1` → `T2`・`t1-l0a-s1` → `T1-L0a`）。どちらからも分からない・一覧に無い・`ISSUE` とタグで食い違う → 止める（`python3 scripts/task.py issue <task> [--issue ..] [--tag ..]` が決める）。dry は課題コードを使わない
+- 決まった課題コードで、データセットの名前は `Orboh/bi_openarm_<外に見せる ID>_<カメラ>_v<条件の版>_<日時>`（`_<日時>` は lerobot が足す）、run_dir の `manifest.json` には `task_ledger`（`task`・`issue`・`external_id`・`condition_version`・`ledger`）が入る。run_dir の名前（`<UTC>-bi-<slug>-<tag>`）は変わらない
+- 途中から再開（`RESUME=true REPO_ID=<stamp 後の実名> DATASET_ROOT=...`）は `REPO_ID` をそのまま使う。今の課題コードと条件の版の名前で始まらない `REPO_ID` へは足さずに止める（承知なら `ALLOW_REPO_ID_MISMATCH=true`）
+- 録らずに確かめる: `CHECK_ONLY=true ISSUE=T1-L2 bash scripts/collect_bimanual.sh gate`（突き合わせと名前の表示だけ。CAN・カメラに触らない）
 - 課題コードは大文字・小文字を問わずに受け、台帳の書き方（`T1-L0a` など）にそろえる
 - `--issue` を渡したときは、課題リストと台帳の文書が手元の clone（既定 `~/projects/doma-sorting-dev`・`TASK_LEDGER_DIR` で変えられる）にあれば、その課題コードの節があるかを見る。文書や節が無ければ警告だけで止めない
 - 条件の版を上げたとき（開始姿勢セット・シーン・カメラのどれかを変えた）: `v<N+1>.pose_set` / `v<N+1>.scene` を足し、`current_version` を変え、タスクファイルの `POSE_SET` / `SCENE` も合わせる

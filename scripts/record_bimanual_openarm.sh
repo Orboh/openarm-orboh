@@ -45,6 +45,8 @@
 #
 # 必須の環境変数: OPERATOR(録った人) と SCENE(scenes/<name>.yaml の name) と
 #   TASK(言語指示) と TASK_SLUG(repo_id に入る英数字_のみのタグ)。
+#   タスクの台帳(config/tasks/<TASK_SLUG>.yaml)があるタスクは ISSUE(課題コード・例 T1-L2)も渡す
+#   (collect_bimanual.sh が決めて渡す)。名前と manifest の task_ledger が課題コードごとになる(下の「Task / dataset」)。
 #   条件を残さない dry run は SCENE=none / TODO 入りシーンは ALLOW_TODO_SCENE=true。
 set -euo pipefail
 
@@ -117,6 +119,41 @@ if [ -z "$TASK_SLUG" ] || ! printf '%s' "$TASK_SLUG" | grep -qE '^[a-z0-9_]+$'; 
   echo "[record-bi] TASK_SLUG は repo_id に入る名前。小文字英数字と _ のみで指定せよ: '$TASK_SLUG'" >&2
   echo "[record-bi] 例: TASK_SLUG=okra" >&2
   exit 1
+fi
+# タスクの台帳（config/tasks/<TASK_SLUG>.yaml・2026-10-28）があるタスクで ISSUE（課題コード）があれば、名前は台帳から作る:
+#   Orboh/bi_openarm_<外に見せる ID>_<カメラ>_v<条件の版>（lerobot の stamp_repo_id が末尾に _<日時> を足す）
+#   外に見せる ID = <タスク ID>_<課題コードを小文字>。組み立ては scripts/task.py name だけが持つ（ここで二重に書かない）。
+# 途中から再開（RESUME=true・REPO_ID=前回の stamp 後の実名）は REPO_ID をそのまま使う。ただし今の課題コードと条件の版の
+# 名前で始まらない REPO_ID（別の課題・旧い版・旧い名前のデータセット）へは足さない（混ざると分けられない）。承知なら
+# ALLOW_REPO_ID_MISMATCH=true。台帳の無いタスク（ボトルなど）は従来どおり Orboh/bi_openarm_<TASK_SLUG>_<カメラ>_v1。
+# 課題コードの必須化は入口（collect_bimanual.sh）がする。ここを直に呼んで ISSUE が無いときは警告して従来の名前で録る。
+ISSUE="${ISSUE:-}"
+TASK_ID="" EXTERNAL_ID="" CONDITION_VERSION=""
+if [ -f "$REPO/config/tasks/${TASK_SLUG}.yaml" ] && [ -n "$ISSUE" ]; then
+  _tn="$(python3 "$REPO/scripts/task.py" name "$TASK_SLUG" "$ISSUE" --fields task,issue,id,version,dataset)" || exit 1
+  read -r TASK_ID ISSUE EXTERNAL_ID CONDITION_VERSION DATASET_BASE <<<"$_tn"
+  case "$DATASET_BASE" in
+    *"_${OBS}_${CONDITION_VERSION}") ;;
+    *) echo "[record-bi] 台帳の名前 $DATASET_BASE のカメラが今のカメラ ($OBS) と違う。WRIST_RIGHT / WRIST_LEFT か台帳の cameras を直す。" >&2
+       exit 1 ;;
+  esac
+  if [ -z "${REPO_ID:-}" ]; then
+    REPO_ID="$DATASET_BASE"
+  elif [ "$REPO_ID" != "$DATASET_BASE" ] && [[ "$REPO_ID" != "${DATASET_BASE}_"* ]]; then
+    if [ "${ALLOW_REPO_ID_MISMATCH:-false}" != "true" ]; then
+      echo "[record-bi] REPO_ID=$REPO_ID は課題コード $ISSUE・条件の版 $CONDITION_VERSION の名前 ${DATASET_BASE}_<日時> ではない。" >&2
+      echo "[record-bi] 別の課題・旧い版のデータセットへ足すと分けられなくなる。再開なら同じ課題コードで録ったデータセットを選ぶ。" >&2
+      echo "[record-bi] 承知の上なら ALLOW_REPO_ID_MISMATCH=true。" >&2
+      exit 1
+    fi
+    echo "[record-bi] 警告: REPO_ID=$REPO_ID は ${DATASET_BASE}_<日時> ではない（ALLOW_REPO_ID_MISMATCH=true で続行）" >&2
+  fi
+  echo "[record-bi] タスクの台帳: task=$TASK_ID issue=$ISSUE external_id=$EXTERNAL_ID condition_version=$CONDITION_VERSION repo_id=$REPO_ID"
+elif [ -f "$REPO/config/tasks/${TASK_SLUG}.yaml" ] && [ "${SCENE:-}" != "none" ]; then
+  echo "[record-bi] 警告: $TASK_SLUG はタスクの台帳があるが ISSUE（課題コード）が無い。従来の名前で録る（collect_bimanual.sh からなら止まる）" >&2
+elif [ -n "$ISSUE" ]; then
+  echo "[record-bi] 注意: $TASK_SLUG にはタスクの台帳が無いので ISSUE=$ISSUE は名前にも manifest にも入れない" >&2
+  ISSUE=""
 fi
 REPO_ID="${REPO_ID:-Orboh/bi_openarm_${TASK_SLUG}_${OBS}_v1}"
 
@@ -574,6 +611,7 @@ fi
   echo "[record-bi] cameras=$CAMERAS"
   echo "[record-bi] d405: $( [ -n "${D405_GAIN:-}" ] && echo "manual exposure=${D405_EXPOSURE:-28000}us gain=$D405_GAIN（camera_setup.py で焼き済み）" || echo "auto exposure（既定。垂らし姿勢で床を見る向きだけ暗く出る）" )"
   echo "[record-bi] d435: auto exposure, brightness=${D435_BRIGHTNESS:-0}"
+  [ -n "$TASK_ID" ] && echo "[record-bi] task=$TASK_ID  issue=$ISSUE  external_id=$EXTERNAL_ID  condition_version=$CONDITION_VERSION"
   echo "[record-bi] obs=$OBS  repo_id=$REPO_ID  resume=$RESUME  root=${DATASET_ROOT:-<default>}  play_sounds=$PLAY_SOUNDS  episodes(this session)=$NUM_EPISODES  ${CAMERA_W}x${CAMERA_H}@${FPS}fps"
   if [ "$PLAY_SOUNDS" = "true" ]; then
     echo "[record-bi] 通知音の意味(espeak-ngの日本語読み上げは聞き取れないため2026-10-19に音へ切替):"
@@ -652,6 +690,9 @@ MANIFEST_ARGS=(
   --repo-root "$REPO"
   --fps "$FPS"
 )
+if [ -n "$TASK_ID" ]; then  # タスクの台帳があり課題コードで録るときだけ（manifest の task_ledger）
+  MANIFEST_ARGS+=(--task-id "$TASK_ID" --issue "$ISSUE" --external-id "$EXTERNAL_ID" --condition-version "$CONDITION_VERSION")
+fi
 if [ "$WRIST_RIGHT" = "true" ]; then
   MANIFEST_ARGS+=(--wrist-right-serial "$WRIST_RIGHT_SERIAL")
 fi
@@ -694,7 +735,7 @@ COMMAND_SH="$RUN_DIR/command.sh"
   printf 'PLAY_SOUNDS=%q DISPLAY_IP=%q DISPLAY_PORT=%q \\\n' "$PLAY_SOUNDS" "$DISPLAY_IP" "$DISPLAY_PORT"
   printf 'D405_GAIN=%q D405_EXPOSURE=%q D435_BRIGHTNESS=%q \\\n' "${D405_GAIN:-}" "${D405_EXPOSURE:-}" "${D435_BRIGHTNESS:-}"
   printf 'TASK=%q \\\n' "$TASK"
-  printf 'TASK_SLUG=%q \\\n' "$TASK_SLUG"
+  printf 'TASK_SLUG=%q ISSUE=%q \\\n' "$TASK_SLUG" "$ISSUE"
   printf 'GRAVITY_COMP=%q LSCALE=%q RSCALE=%q GRAVITY_URDF=%q ALIGN_GRAVITY=%q \\\n' "$GRAVITY_COMP" "$LSCALE" "$RSCALE" "$GRAVITY_URDF" "$ALIGN_GRAVITY"
   printf 'BILATERAL_FEEDBACK=%q PARALLEL_ARMS=%q PARALLEL_LEADER_FOLLOWER=%q \\\n' "$BILATERAL_FEEDBACK" "$PARALLEL_ARMS" "$PARALLEL_LEADER_FOLLOWER"
   printf 'L_BILATERAL_GRIPPER_KP=%q L_BILATERAL_GRIPPER_KD=%q R_BILATERAL_GRIPPER_KP=%q R_BILATERAL_GRIPPER_KD=%q \\\n' \

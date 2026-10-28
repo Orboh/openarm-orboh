@@ -13,7 +13,12 @@
 使い方（~/projects/openarm-orboh）:
   python3 scripts/task.py list [--json]                                # タスクと課題コード・外に見せる ID
   python3 scripts/task.py check <task> [--issue T1-L2]                 # 収集の前の突き合わせ（食い違えば終了コード 1）
-  python3 scripts/task.py name <task> <issue> [--model-version N] [--mix] [--json]
+  python3 scripts/task.py name <task> <issue> [--model-version N] [--mix] [--json | --fields task,issue,id,version,dataset]
+  python3 scripts/task.py issue <task> [--issue T1-L2] [--tag t1-l2-s1]  # 課題コードを決める（台帳の書き方で 1 行・決まらなければ終了コード 1）
+
+issue が見るもの（collect_bimanual.sh が gate / session の前に呼ぶ・2026-10-28）:
+  --issue があればそれ。無ければタグの中の課題コード（t1-l2-s1 → T1-L2・t2-s1 → T2・t1-l0a-s1 → T1-L0a）
+  どちらも無い・このタスクの一覧に無い・--issue とタグで食い違う・タグに 2 つ以上ある → 理由を出して終了コード 1
 
 check が見るもの:
   タスクファイルの TASK・TASK_SLUG・POSE_SET・SCENE・カメラが台帳（今の条件の版）と一致する
@@ -45,6 +50,8 @@ TASKS = REPO / "config/tasks"
 PS_ROOT = Path(os.environ.get("PS_ROOT") or REPO / "config/pose_sets")
 ENV_KEYS = ("TASK", "TASK_SLUG", "POSE_SET", "SCENE", "WRIST_RIGHT", "WRIST_LEFT")  # check が見るタスクファイルの値
 ISSUE_RE = re.compile(r"^T\d+(-L\d+[a-z]?)?$", re.I)  # T2・T1-L2・T1-L0a
+# タグの中の課題コード。前後が英数字でない所だけ取る（t1-l2-s1・x-t2-s1 は取り、takeei・st1 の t は取らない）
+TAG_ISSUE_RE = re.compile(r"(?<![a-z0-9])t\d+(?:-l\d+[a-z]?)?(?![a-z0-9])", re.I)
 
 
 def read_kv(p: Path) -> dict[str, str]:
@@ -256,7 +263,47 @@ def cmd_check(a) -> int:
     return 0
 
 
+# ---- issue ----------------------------------------------------------------------
+def tag_issues(tag: str) -> list[str]:
+    """タグの中の課題コード（小文字のまま・出てきた順・重複なし）。例 t1-l2-s1 → ['t1-l2']。"""
+    return list(dict.fromkeys(m.group(0).lower() for m in TAG_ISSUE_RE.finditer(tag or "")))
+
+
+def resolve_issue(t: Task, issue: str, tag: str) -> tuple[str, str]:
+    """(台帳の書き方の課題コード, 止める理由)。決まれば理由は空、決まらなければコードが空。"""
+    from_tag = tag_issues(tag)
+    if len(from_tag) > 1:
+        return "", f"タグ '{tag}' に課題コードが 2 つ以上ある（{', '.join(from_tag)}）。タグには 1 つだけ入れる"
+    tag_code = t.canon(from_tag[0]) if from_tag else ""
+    if issue.strip():
+        code = t.canon(issue)
+        if tag_code and tag_code.lower() != code.lower():
+            return "", f"ISSUE={issue.strip()} とタグ '{tag}' の課題コード {tag_code} が違う。どちらかに合わせる"
+        where = f"ISSUE={issue.strip()}"
+    elif tag_code:
+        code, where = tag_code, f"タグ '{tag}'"
+    else:
+        return "", (f"{t.name} は課題コードが要る。ISSUE=T1-L2 を付けるか、session のタグに入れる"
+                    f"（例 session t1-l2-s1）。一覧: {', '.join(t.issues)}")
+    if not ISSUE_RE.match(code) or code not in t.issues:
+        return "", f"{where} の課題コード {code} は {t.name} の課題コードに無い（一覧: {', '.join(t.issues)}）"
+    return code, ""
+
+
+def cmd_issue(a) -> int:
+    t = load(a.name)
+    code, why = resolve_issue(t, a.issue or "", a.tag or "")
+    if why:
+        print(f"[task] 止める。{why}", file=sys.stderr)
+        return 1
+    print(code)
+    return 0
+
+
 # ---- name -----------------------------------------------------------------------
+NAME_FIELDS = ("task", "issue", "id", "version", "dataset", "model")
+
+
 def cmd_name(a) -> int:
     t = load(a.name)
     code = t.canon(a.issue)
@@ -267,6 +314,15 @@ def cmd_name(a) -> int:
     out = {"task": t.name, "issue": code, "id": t.ext_id(code), "version": t.version,
            "dataset": t.fill("dataset_name", code),
            "model": t.fill("model_mix_name" if a.mix else "model_name", code, a.model_version)}
+    if a.fields:  # シェルが read で受ける形: 値を空白区切りで 1 行（どの値も空白を含まない）
+        keys = [k.strip() for k in a.fields.split(",") if k.strip()]
+        unknown = [k for k in keys if k not in NAME_FIELDS]
+        if unknown:
+            sys.exit(f"[task] --fields に知らない項目: {', '.join(unknown)}（使えるもの: {', '.join(NAME_FIELDS)}）")
+        if any(not out[k] or " " in out[k] for k in keys):
+            sys.exit(f"[task] 空の値か空白を含む値がある（台帳を確かめる）: {out}")
+        print(" ".join(out[k] for k in keys))
+        return 0
     if a.json:
         print(json.dumps(out, ensure_ascii=False, indent=2))
         return 0
@@ -286,7 +342,12 @@ def main() -> int:
     p.set_defaults(fn=cmd_check)
     p = sub.add_parser("name"); p.add_argument("name"); p.add_argument("issue")
     p.add_argument("--model-version", type=int, default=1); p.add_argument("--mix", action="store_true")
-    p.add_argument("--json", action="store_true"); p.set_defaults(fn=cmd_name)
+    p.add_argument("--json", action="store_true")
+    p.add_argument("--fields", help=f"値だけを空白区切りで 1 行に出す（{','.join(NAME_FIELDS)} から選ぶ。record_bimanual_openarm.sh が使う）")
+    p.set_defaults(fn=cmd_name)
+    p = sub.add_parser("issue"); p.add_argument("name"); p.add_argument("--issue", default="")
+    p.add_argument("--tag", default="", help="session のタグ（例 t1-l2-s1）。--issue が無いときはここから読む")
+    p.set_defaults(fn=cmd_issue)
     a = ap.parse_args()
     return a.fn(a)
 
