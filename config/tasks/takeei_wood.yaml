@@ -1,0 +1,22 @@
+# タスクの台帳。scripts/task.py が読む（1 行 1 キー・入れ子なし・PyYAML 不要）。書式と運用は config/tasks/README.md
+# 命名則の正本: Orboh/doma-sorting-dev 07-collection/README.md「命名則」（2026-10-28）
+task: takeei_wood
+title: タケエイ土間選別・木材（木のブロックを拾って木材の箱へ入れる）
+lang: Pick up the wood and place it in the box
+env_file: config/bimanual-collect.takeei_wood.env
+cameras: chest_wristr_wristl
+issue_list: Orboh/doma-sorting-dev:07-collection/wood-issue-list.md
+# このタスクの課題コード（定義は issue_list の文書。ここは一覧だけ。録る・録らないは台帳の状態で持つ）。T2 は木材では段を分けない
+issues: T1-L0a,T1-L1,T1-L2,T1-L3,T2,T3-L1,T3-L2,T3-L3,T4-L1,T4-L2,T4-L3,T5-L1,T5-L2,T5-L3
+# 条件の版（開始姿勢セット・シーン・カメラのどれかが変わったら上げる）。current_version が今の版
+current_version: v2
+v1.pose_set: kitakyushu-wood-l1-v1
+v1.scene: kitakyushu-wood-l1-v1
+v1.note: 旧姿勢（A）。もう録らない
+v2.pose_set: kitakyushu-takeei-v5
+v2.scene: kitakyushu-wood-l1-v1
+v2.note: 2026-10-28 から
+# 名前の型。{id}=外に見せる ID（takeei_wood_t1-l2）・{id_hyphen}=その下線をハイフンに・{task_hyphen}=タスク ID の下線をハイフンに
+dataset_name: Orboh/bi_openarm_{id}_{cameras}_{version}
+model_name: Orboh/gr00t-bi-openarm-{id_hyphen}-v{n}
+model_mix_name: Orboh/gr00t-bi-openarm-{task_hyphen}-mix-v{n}

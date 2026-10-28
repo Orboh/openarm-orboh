@@ -8,6 +8,8 @@
 #   bash scripts/collect_bimanual.sh gate                # 受入ゲート 10 本（タグ <slug>-v1-s1）→ 止めて検査
 #   bash scripts/collect_bimanual.sh session s2 [10]     # 続きのセッション（タグ <slug>-v1-s2・本数既定 10）
 #   RESUME=true DATASET_ROOT=... bash scripts/collect_bimanual.sh session s2   # 既存データセットへ追記（本体の契約どおり）
+#   ENV_FILE=config/bimanual-collect.takeei_wood.env OPERATOR=Kota ISSUE=T1-L2 bash scripts/collect_bimanual.sh gate   # タスクの台帳（config/tasks/）があるタスクは
+#                                                            #   gate/session の前に scripts/task.py check で条件の版と課題コードを見る（2026-10-28）
 #   DISPLAY_IP=<手元PC> DISPLAY_PORT=9876 bash scripts/collect_bimanual.sh gate # 手元の rerun へ映像を飛ばす
 #   MONITOR=off bash scripts/collect_bimanual.sh gate      # record 中の映像をモニターに出さない（既定は on＝Thor のビューア :9876 へ 3 眼を流す・2026-09-22 Kento。関節値は 2026-10-05 から既定で送らない）
 #   DISPLAY_SCALARS=true bash scripts/collect_bimanual.sh gate   # 関節値の時系列もモニターに流す（9/22 にビューアが数分で固まった挙動。表示のみ）
@@ -47,6 +49,12 @@ fi
 if [ "$MODE" != "dry" ] && [ "${SCENE:-TODO}" = "TODO" ]; then
   echo "[collect-bi] $ENV_FILE の SCENE が未記入(TODO)。scenes/<name>.yaml を実測で作ってから。" >&2
   exit 1
+fi
+# タスクの台帳との突き合わせ（2026-10-28）。config/tasks/<TASK_SLUG>.yaml があるタスクだけ、指示文・開始姿勢セット・
+# シーンが台帳の今の条件の版とそろっているかを録る前に見る（食い違えば止める）。台帳の無いタスク（ボトルなど）と dry は素通り。
+# ISSUE=T1-L2 を渡すと課題コードがこのタスクの一覧にあるかも見る。中身は scripts/task.py と config/tasks/README.md
+if [ "$MODE" != "dry" ] && [ -f "$REPO/config/tasks/${TASK_SLUG}.yaml" ]; then
+  python3 "$REPO/scripts/task.py" check "$TASK_SLUG" --env-file "$ENV_FILE" --environ ${ISSUE:+--issue "$ISSUE"} || exit 1
 fi
 
 # CAN 4 本の事前確認（2026-10-21）。PEAK が USB ごと再接続されると udev は固定名だけ付け直し、
