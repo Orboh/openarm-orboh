@@ -14,6 +14,7 @@ manifest は設定の全文を持たない。lerobot は起動時に解決済み
   4. 較正ファイルの sha256 と mtime
   5. HF 身元 (push 時に追記。収録時はオフラインで取れない)
   6. マージ順と run 毎 ep 数 (統合後に台帳と突合する鍵)
+  (2026-10-28 追加) タスクの台帳のタスク ID・課題コード・外に見せる ID・条件の版 (task_ledger)
 
 加えて不一致検査のためだけに4統制変数を意図的に複製する
 (side / カメラ serial / fps / GRAVITY_SCALE)。これらが複数セッションで
@@ -233,6 +234,19 @@ def count_scene_todos(scene_path: Path) -> int | None:
     return sum(walk(data))
 
 
+def _task_ledger_block(args: argparse.Namespace) -> dict | None:
+    """タスク ID・課題コード・外に見せる ID・条件の版（どれも record が scripts/task.py name から受けて渡す）。"""
+    if not args.task_id:
+        return None
+    return {
+        "task": args.task_id,
+        "issue": args.issue or None,
+        "external_id": args.external_id or None,
+        "condition_version": args.condition_version or None,
+        "ledger": f"config/tasks/{args.task_id}.yaml",
+    }
+
+
 # --- init -------------------------------------------------------------------
 
 
@@ -291,6 +305,10 @@ def cmd_init(args: argparse.Namespace) -> int:
             "operator": args.operator,
             "judge": args.judge or None,
         },
+        # タスクの台帳（config/tasks/<task>.yaml・2026-10-28）で録ったセッションだけ持つ。台帳の無いタスクは null。
+        # データセットの名前（repo_id）にも外に見せる ID と条件の版は入っているが、名前を文字列で割らずに
+        # 「どの課題コードのセッションか」を機械で引けるように、別々の項目として置く。操作者は people.operator。
+        "task_ledger": _task_ledger_block(args),
         "scene": scene,
         "initial_pose": initial_pose,
         **({"initial_pose_left": initial_pose_left} if initial_pose_left is not None else {}),
@@ -623,6 +641,10 @@ def main(argv: list[str] | None = None) -> int:
     init.add_argument("--repo-id", required=True)
     init.add_argument("--repo-root", default="")
     init.add_argument("--lerobot-root", default="")
+    init.add_argument("--task-id", default="", help="タスクの台帳のタスク ID（例 takeei_wood）。空なら task_ledger は null")
+    init.add_argument("--issue", default="", help="課題コード（台帳の書き方・例 T1-L2）")
+    init.add_argument("--external-id", default="", help="外に見せる ID（例 takeei_wood_t1-l2）")
+    init.add_argument("--condition-version", default="", help="条件の版（台帳の current_version・例 v2）")
     init.set_defaults(func=cmd_init)
 
     res = sub.add_parser("resolve", help="収集の後に stamp 後 repo_id と ep 数を埋める")
