@@ -103,7 +103,7 @@ GRIPPER_KP=12 bash scripts/collect_bimanual.sh session s2 [10]   # 続きのセ�
 ```
 
 - `TASK` / `TASK_SLUG` が `TODO` のままだと起動を拒否する。`gate` と `session` は `SCENE=<scenes/のname>` も必須（`scenes/_TEMPLATE.yaml` をコピーし TODO を全部埋める。`python scripts/collect_manifest.py check-scene --scene-path scenes/<name>.yaml` が残り TODO 数を出す。1 本でも録ったあとは書き換えず `-v2` の新ファイルにする）
-- タスクの台帳 `config/tasks/<TASK_SLUG>.yaml` があるタスク（2026-10-28〜 `takeei_wood`）は、`gate` / `session` の前に `python3 scripts/task.py check` が指示文・開始姿勢セット・シーンを台帳の今の条件の版と突き合わせ、食い違えば止める。`ISSUE=T1-L2` を渡すと課題コードも見る。名前（外に見せる ID・HF のデータセットとモデル）は `python3 scripts/task.py name <task> <課題コード>`。説明は `config/tasks/README.md`
+- タスクの台帳 `config/tasks/<TASK_SLUG>.yaml` があるタスク（2026-10-28〜 `takeei_wood`）は、`gate` / `session` の前に `python3 scripts/task.py check` が指示文・開始姿勢セット・シーンを台帳の今の条件の版と突き合わせ、食い違えば止める。課題コードは必須（`ISSUE=T1-L2`、無ければ session のタグ `t1-l2-s1` から読む）で、データセットの名前と `manifest.json` の `task_ledger` に入る（2026-10-28）。録らずに確かめるなら `CHECK_ONLY=true`。名前（外に見せる ID・HF のデータセットとモデル）は `python3 scripts/task.py name <task> <課題コード>`。説明は `config/tasks/README.md`
 - `GRIPPER_KP` は follower gripper（dm4310）の位置 kp。既定 25 のまま硬い物を握り込むとコイルが 100 ℃のラッチに達する（2026-09-21 実測 99 ℃）。積み木など硬い対象は 10〜12 を渡す
 - キー操作は §B と同じ（右矢印 = 次のエピソード / `a` = leader 左→右→follower の順に開始姿勢へ復帰 / 左矢印 = 直前を破棄 / `esc` = 終了）
 - 2026-10-17 追加（**実機未検証・既定は無効**。付けなければ従来どおり）: `START_POSE_HOLD=true`（`a` の後と起動直後に両腕を開始姿勢で保持し、leader を放せる。保持を解く前に leader のずれを読み `START_POSE_HANDOFF_DEG`＝既定 15° を超えていたら始めない）、`SAVE_ON_RETURN=true`（`a` の時点で前のテイクを保存。右矢印は開始だけ）、`START_COUNTDOWN_S=3`（右矢印の後に秒読みとベル）。動機は待機中に leader の手首が垂れて follower の J7 が過温ラッチした件。説明は `scripts/record_bimanual_openarm.sh` の「開始姿勢での保持」、試験手順は Vault `07Member's-free-space/Kento/00-Dev-Log/2026-10-06-record-hold-and-cue-implementation.md` §5
@@ -219,7 +219,7 @@ near-zero 判定は **「基準零位姿勢」**（各リンクをまっすぐ�
 - `record_pick_place_openarm.sh` … pick-and-place データセット収録本体（`REMOTE=true`/`WRIST=true` 等は env で切替）
 - `record_remote.sh` … 遠隔テレオペ収集の起動ラッパー（`record_pick_place_openarm.sh` に定型 env を焼き込み）
 - `pull_run.sh` … 収集セッションの軽量メタを Thor から Vault へ回収
-- `task.py list|check|name` … タスクの台帳（`config/tasks/`）の一覧・収集の前の突き合わせ・命名則どおりの名前（標準ライブラリだけ）
+- `task.py list|check|name|issue` … タスクの台帳（`config/tasks/`）の一覧・収集の前の突き合わせ・命名則どおりの名前・課題コードの決定（標準ライブラリだけ）
 - `calibrate_openarm.sh` … OpenArm 恒久ゼロ較正（`hang_down`/`bump_to_stop`）
 - `sync_status.sh` … openarm-orboh / lerobot / XRoboToolkit-Orin-Video-Sender 3リポ×両マシンの同期負債（未push/上流より古い/未コミット）を一括確認
 - `openarm_motor_status.py <iface> [--hz N | --once]` … 単一アームのモータ状態ライブモニタ（関節角を度数表示・enable のみ＝トルク無しの read-only）
