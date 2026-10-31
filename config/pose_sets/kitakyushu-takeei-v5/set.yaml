@@ -1,0 +1,22 @@
+# 開始姿勢セット。scripts/pose_set.py が読み書きする（1 行 1 キー・入れ子なし）。書式と運用は config/pose_sets/README.md
+name: kitakyushu-takeei-v5
+status: frozen
+created_at: 2026-10-24 11:45
+derived_from: kitakyushu-takeei-v2
+arms: both
+mirror: false
+pose_left_sha: e2802a5f2cbc
+pose_right_sha: 3a255d789c47
+calib_follower_left: a6497c782842
+calib_follower_right: 63f755d3e9ad
+calib_leader_left: 99559b731c6e
+calib_leader_right: 142fc7aeb245
+calib_status: ok
+scene: kitakyushu-wood-l1-v1
+scene_sha: 26456c42479d
+code_openarm_orboh: e9241498+dirty
+code_lerobot: a720ec19
+synced_at: 2026-10-26 14:17
+frozen_at: 2026-10-26 14:22
+datasets: Orboh/bi_openarm_takeei_wood_l1_chest_wristr_wristl_v1_20261026_141740,Orboh/bi_openarm_takeei_wood_l1_chest_wristr_wristl_v1_20261026_143052,Orboh/bi_openarm_takeei_wood_l1_chest_wristr_wristl_v1_20261026_144420,Orboh/bi_openarm_takeei_wood_l1_chest_wristr_wristl_v1_20261026_144458,Orboh/bi_openarm_takeei_wood_l1_chest_wristr_wristl_v1_20261026_144901,Orboh/bi_openarm_takeei_wood_l1_chest_wristr_wristl_v1_20261026_145616,Orboh/bi_openarm_takeei_wood_l1_chest_wristr_wristl_v1_20261026_150247,Orboh/bi_openarm_takeei_wood_l1_chest_wristr_wristl_v1_20261026_152944,Orboh/bi_openarm_takeei_wood_l1_chest_wristr_wristl_v1_20261026_160544,Orboh/bi_openarm_takeei_wood_l1_chest_wristr_wristl_v1_20261026_175644,Orboh/bi_openarm_takeei_wood_l1_chest_wristr_wristl_v1_20261026_192159,Orboh/bi_openarm_takeei_wood_l1_chest_wristr_wristl_v1_20261026_195244,Orboh/bi_openarm_takeei_wood_l1_chest_wristr_wristl_v1_20261026_201827,Orboh/bi_openarm_takeei_wood_l1_chest_wristr_wristl_v1_20261026_205803
+collections: 20261026T051734Z-bi-takeei-wood-l1-v1-s1,20261026T053046Z-bi-takeei-wood-l1-v1-s2,20261026T054414Z-bi-takeei-wood-l1-v1-s3,20261026T054452Z-bi-takeei-wood-l1-v1-s1,20261026T054855Z-bi-takeei-wood-l1-v1-s1,20261026T055610Z-bi-takeei-wood-l1-v1-s1,20261026T060241Z-bi-takeei-wood-l1-v1-s1,20261026T062938Z-bi-takeei-wood-l1-v1-s1,20261026T070537Z-bi-takeei-wood-l1-v1-s1,20261026T085638Z-bi-takeei-wood-l1-v1-s1,20261026T102154Z-bi-takeei-wood-l1-v1-s1,20261026T105238Z-bi-takeei-wood-l1-v1-s1,20261026T111821Z-bi-takeei-wood-l1-v1-s1,20261026T115757Z-bi-takeei-wood-l1-v1-s1

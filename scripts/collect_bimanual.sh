@@ -8,6 +8,11 @@
 #   bash scripts/collect_bimanual.sh gate                # 受入ゲート 10 本（タグ <slug>-v1-s1）→ 止めて検査
 #   bash scripts/collect_bimanual.sh session s2 [10]     # 続きのセッション（タグ <slug>-v1-s2・本数既定 10）
 #   RESUME=true DATASET_ROOT=... bash scripts/collect_bimanual.sh session s2   # 既存データセットへ追記（本体の契約どおり）
+#   ENV_FILE=config/bimanual-collect.takeei_wood.env OPERATOR=Kota ISSUE=T1-L2 bash scripts/collect_bimanual.sh gate   # タスクの台帳（config/tasks/）があるタスクは
+#                                                            #   gate/session の前に scripts/task.py check で条件の版と課題コードを見る（2026-10-28）
+#   ENV_FILE=config/bimanual-collect.takeei_wood.env OPERATOR=Kota bash scripts/collect_bimanual.sh session t1-l2-s1   # 台帳のあるタスクは課題コードが必須。
+#                                                            #   ISSUE が無ければタグから読む（t1-l2-s1 → T1-L2）。データセットは Orboh/bi_openarm_<タスク>_<課題>_<カメラ>_v<条件の版>_<日時>
+#   CHECK_ONLY=true ISSUE=T1-L2 bash scripts/collect_bimanual.sh gate   # 台帳・課題コードの突き合わせと名前の表示だけ（録らない・CAN に触らない）
 #   DISPLAY_IP=<手元PC> DISPLAY_PORT=9876 bash scripts/collect_bimanual.sh gate # 手元の rerun へ映像を飛ばす
 #   MONITOR=off bash scripts/collect_bimanual.sh gate      # record 中の映像をモニターに出さない（既定は on＝Thor のビューア :9876 へ 3 眼を流す・2026-09-22 Kento。関節値は 2026-10-05 から既定で送らない）
 #   DISPLAY_SCALARS=true bash scripts/collect_bimanual.sh gate   # 関節値の時系列もモニターに流す（9/22 にビューアが数分で固まった挙動。表示のみ）
@@ -46,6 +51,34 @@ if printf '%s' "${TASK:-}" | grep -q '^TODO' || [ "${TASK_SLUG:-TODO}" = "TODO" 
 fi
 if [ "$MODE" != "dry" ] && [ "${SCENE:-TODO}" = "TODO" ]; then
   echo "[collect-bi] $ENV_FILE の SCENE が未記入(TODO)。scenes/<name>.yaml を実測で作ってから。" >&2
+  exit 1
+fi
+# タスクの台帳との突き合わせ（2026-10-28）。config/tasks/<TASK_SLUG>.yaml があるタスクだけ、指示文・開始姿勢セット・
+# シーンが台帳の今の条件の版とそろっているかを録る前に見る（食い違えば止める）。台帳の無いタスク（ボトルなど）と dry は素通り。
+# 中身は scripts/task.py と config/tasks/README.md
+# 課題コード（T1-L2 など）も必須にする。ISSUE=T1-L2 があればそれ、無ければ session のタグ（t1-l2-s1 → T1-L2）から読む。
+# どちらからも分からない・一覧に無い・食い違う → 止める。決まったコードを ISSUE として record（データセットの名前と
+# manifest）へ渡す。dry は捨て名で録るので課題コードを使わない（渡されても外す）。
+# CHECK_ONLY=true は、ここまでの突き合わせと名前の表示だけをして録らずに終える（CAN にもカメラにも触らない）。
+if [ "$MODE" = "dry" ]; then
+  unset ISSUE
+elif [ -f "$REPO/config/tasks/${TASK_SLUG}.yaml" ]; then
+  _tag_arg=(); [ "$MODE" = "session" ] && _tag_arg=(--tag "${2:-}")
+  ISSUE="$(python3 "$REPO/scripts/task.py" issue "$TASK_SLUG" --issue "${ISSUE:-}" ${_tag_arg[@]+"${_tag_arg[@]}"})" || exit 1
+  export ISSUE
+  python3 "$REPO/scripts/task.py" check "$TASK_SLUG" --env-file "$ENV_FILE" --environ --issue "$ISSUE" || exit 1
+fi
+if [ "${CHECK_ONLY:-false}" = "true" ]; then
+  echo "[collect-bi] CHECK_ONLY: mode=$MODE task=$TASK_SLUG issue=${ISSUE:-なし}。突き合わせだけで録らずに終える（データセットの名前は lerobot が末尾に _<日時> を足したものになる）"
+  exit 0
+fi
+
+# CAN 4 本の事前確認（2026-10-21）。PEAK が USB ごと再接続されると udev は固定名だけ付け直し、
+# ビットレート設定と UP は消える。そのまま起動するとフォロワー整列（約 30 秒）の後に
+# リーダー connect で "Network is down" で落ちるので、起動前に止める。
+if ! bash "$REPO/scripts/can_check.sh" can_lead_r can_lead_l can_fol_r can_fol_l; then
+  echo "[collect-bi] CAN が 4 本そろっていない。sudo bash scripts/canup.sh をやり直してから再実行する。" >&2
+  echo "[collect-bi] 繰り返すなら PEAK の USB 抜けを疑う: journalctl -k | grep -E 'USB disconnect|error -71'" >&2
   exit 1
 fi
 
@@ -110,21 +143,23 @@ export OPERATOR TASK TASK_SLUG EPISODE_TIME_S LSCALE RSCALE
 export CAM_SERIAL="${CHEST_SERIAL:-344422070898}"
 export WRIST_RIGHT="${WRIST_RIGHT:-true}" WRIST_RIGHT_SERIAL WRIST_LEFT WRIST_LEFT_SERIAL
 
-echo "[collect-bi] mode=$MODE tag=$TAG episodes=$NUM_EPISODES scene=$SCENE task='$TASK' cams=chest+$( [ "$WRIST_RIGHT" = true ] && printf 'wrist_right' )$( [ "$WRIST_LEFT" = true ] && printf '+wrist_left' ) repo_id=${REPO_ID:-<auto>} monitor=$MON_NOTE"
+echo "[collect-bi] mode=$MODE tag=$TAG issue=${ISSUE:-none} episodes=$NUM_EPISODES scene=$SCENE task='$TASK' cams=chest+$( [ "$WRIST_RIGHT" = true ] && printf 'wrist_right' )$( [ "$WRIST_LEFT" = true ] && printf '+wrist_left' ) repo_id=${REPO_ID:-<auto>} monitor=$MON_NOTE"
 # RealSense は SDK 直読が排他: モニター用プレビューが動いていれば止める。次いで D405 の露出/ゲインを焼く
 bash "$REPO/scripts/preview_on_monitor.sh" stop-preview >/dev/null 2>&1 || true
 # USB 省電力を止める（udev ルールの保険。再列挙で auto に戻ることがある）
 for _d in /sys/bus/usb/devices/*; do
   [ -f "$_d/idVendor" ] || continue
-  case "$(cat "$_d/idVendor"):$(cat "$_d/idProduct")" in 05e3:0626|8086:0b3a|8086:0b5b) echo on | sudo -n tee "$_d/power/control" >/dev/null 2>&1 ;; esac
+  case "$(cat "$_d/idVendor"):$(cat "$_d/idProduct")" in 05e3:0626|8086:0b3a|8086:0b5b) { echo on | sudo -n tee "$_d/power/control" >/dev/null 2>&1 || true; } ;; esac
 done
 _cs=()
 if [ -n "${D405_GAIN:-}" ]; then _cs+=(--d405-gain "$D405_GAIN" --d405-exposure "${D405_EXPOSURE:-28000}"); else _cs+=(--d405-auto); fi   # 空なら前セッションの手動値を自動露出へ戻す
-[ -n "${D435_BRIGHTNESS:-}" ] && _cs+=(--d435-brightness "$D435_BRIGHTNESS")
+if [ -n "${D435_GAIN:-}" ]; then _cs+=(--d435-gain "$D435_GAIN" --d435-exposure "${D435_EXPOSURE:-80}")   # 手動露出（白い机で自動露出+brightnessでは白飛びが解消しなかった場合に使う）
+elif [ -n "${D435_BRIGHTNESS:-}" ]; then _cs+=(--d435-brightness "$D435_BRIGHTNESS")
+fi
 if [ ${#_cs[@]} -gt 0 ]; then
   sleep 2
   "$HOME/projects/lerobot/.venv/bin/python" "$REPO/scripts/camera_setup.py" "${_cs[@]}" || { echo "[collect-bi] camera_setup（${_cs[*]}）に失敗。カメラを掴んでいるプロセスが無いか確認" >&2; exit 1; }
 fi
-export D405_GAIN D405_EXPOSURE D435_BRIGHTNESS
+export D405_GAIN D405_EXPOSURE D435_GAIN D435_EXPOSURE D435_BRIGHTNESS
 # pynput が無言でキーを食う既知問題の予防（ssh -X でも DISPLAY を落として stdin 直読みにする）
 exec env -u DISPLAY -u WAYLAND_DISPLAY bash "$REPO/scripts/record_bimanual_openarm.sh" "$TAG"

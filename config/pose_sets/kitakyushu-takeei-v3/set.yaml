@@ -1,0 +1,19 @@
+# 開始姿勢セット。scripts/pose_set.py が読み書きする（1 行 1 キー・入れ子なし）。書式と運用は config/pose_sets/README.md
+name: kitakyushu-takeei-v3
+status: draft
+created_at: 2026-10-24 11:33
+derived_from: kitakyushu-takeei-v2
+arms: both
+mirror: false
+pose_left_sha: a53e53f55881
+pose_right_sha: 9079b8825770
+calib_follower_left: a6497c782842
+calib_follower_right: 63f755d3e9ad
+calib_leader_left: 99559b731c6e
+calib_leader_right: 142fc7aeb245
+calib_status: ok
+scene: kitakyushu-takeei-v1
+scene_sha: 60a5f3752726
+code_openarm_orboh: 9acb489a+dirty
+code_lerobot: 36fe5d8f+dirty
+synced_at: 2026-10-24 11:33

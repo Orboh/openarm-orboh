@@ -45,6 +45,8 @@
 #
 # 必須の環境変数: OPERATOR(録った人) と SCENE(scenes/<name>.yaml の name) と
 #   TASK(言語指示) と TASK_SLUG(repo_id に入る英数字_のみのタグ)。
+#   タスクの台帳(config/tasks/<TASK_SLUG>.yaml)があるタスクは ISSUE(課題コード・例 T1-L2)も渡す
+#   (collect_bimanual.sh が決めて渡す)。名前と manifest の task_ledger が課題コードごとになる(下の「Task / dataset」)。
 #   条件を残さない dry run は SCENE=none / TODO 入りシーンは ALLOW_TODO_SCENE=true。
 set -euo pipefail
 
@@ -118,6 +120,41 @@ if [ -z "$TASK_SLUG" ] || ! printf '%s' "$TASK_SLUG" | grep -qE '^[a-z0-9_]+$'; 
   echo "[record-bi] 例: TASK_SLUG=okra" >&2
   exit 1
 fi
+# タスクの台帳（config/tasks/<TASK_SLUG>.yaml・2026-10-28）があるタスクで ISSUE（課題コード）があれば、名前は台帳から作る:
+#   Orboh/bi_openarm_<外に見せる ID>_<カメラ>_v<条件の版>（lerobot の stamp_repo_id が末尾に _<日時> を足す）
+#   外に見せる ID = <タスク ID>_<課題コードを小文字>。組み立ては scripts/task.py name だけが持つ（ここで二重に書かない）。
+# 途中から再開（RESUME=true・REPO_ID=前回の stamp 後の実名）は REPO_ID をそのまま使う。ただし今の課題コードと条件の版の
+# 名前で始まらない REPO_ID（別の課題・旧い版・旧い名前のデータセット）へは足さない（混ざると分けられない）。承知なら
+# ALLOW_REPO_ID_MISMATCH=true。台帳の無いタスク（ボトルなど）は従来どおり Orboh/bi_openarm_<TASK_SLUG>_<カメラ>_v1。
+# 課題コードの必須化は入口（collect_bimanual.sh）がする。ここを直に呼んで ISSUE が無いときは警告して従来の名前で録る。
+ISSUE="${ISSUE:-}"
+TASK_ID="" EXTERNAL_ID="" CONDITION_VERSION=""
+if [ -f "$REPO/config/tasks/${TASK_SLUG}.yaml" ] && [ -n "$ISSUE" ]; then
+  _tn="$(python3 "$REPO/scripts/task.py" name "$TASK_SLUG" "$ISSUE" --fields task,issue,id,version,dataset)" || exit 1
+  read -r TASK_ID ISSUE EXTERNAL_ID CONDITION_VERSION DATASET_BASE <<<"$_tn"
+  case "$DATASET_BASE" in
+    *"_${OBS}_${CONDITION_VERSION}") ;;
+    *) echo "[record-bi] 台帳の名前 $DATASET_BASE のカメラが今のカメラ ($OBS) と違う。WRIST_RIGHT / WRIST_LEFT か台帳の cameras を直す。" >&2
+       exit 1 ;;
+  esac
+  if [ -z "${REPO_ID:-}" ]; then
+    REPO_ID="$DATASET_BASE"
+  elif [ "$REPO_ID" != "$DATASET_BASE" ] && [[ "$REPO_ID" != "${DATASET_BASE}_"* ]]; then
+    if [ "${ALLOW_REPO_ID_MISMATCH:-false}" != "true" ]; then
+      echo "[record-bi] REPO_ID=$REPO_ID は課題コード $ISSUE・条件の版 $CONDITION_VERSION の名前 ${DATASET_BASE}_<日時> ではない。" >&2
+      echo "[record-bi] 別の課題・旧い版のデータセットへ足すと分けられなくなる。再開なら同じ課題コードで録ったデータセットを選ぶ。" >&2
+      echo "[record-bi] 承知の上なら ALLOW_REPO_ID_MISMATCH=true。" >&2
+      exit 1
+    fi
+    echo "[record-bi] 警告: REPO_ID=$REPO_ID は ${DATASET_BASE}_<日時> ではない（ALLOW_REPO_ID_MISMATCH=true で続行）" >&2
+  fi
+  echo "[record-bi] タスクの台帳: task=$TASK_ID issue=$ISSUE external_id=$EXTERNAL_ID condition_version=$CONDITION_VERSION repo_id=$REPO_ID"
+elif [ -f "$REPO/config/tasks/${TASK_SLUG}.yaml" ] && [ "${SCENE:-}" != "none" ]; then
+  echo "[record-bi] 警告: $TASK_SLUG はタスクの台帳があるが ISSUE（課題コード）が無い。従来の名前で録る（collect_bimanual.sh からなら止まる）" >&2
+elif [ -n "$ISSUE" ]; then
+  echo "[record-bi] 注意: $TASK_SLUG にはタスクの台帳が無いので ISSUE=$ISSUE は名前にも manifest にも入れない" >&2
+  ISSUE=""
+fi
 REPO_ID="${REPO_ID:-Orboh/bi_openarm_${TASK_SLUG}_${OBS}_v1}"
 
 # ---- Gravity compensation (leader) --------------------------------------------
@@ -125,6 +162,34 @@ GRAVITY_COMP="${GRAVITY_COMP:-true}"
 LSCALE="${LSCALE:-1.0}"
 RSCALE="${RSCALE:-1.0}"
 GRAVITY_URDF="${GRAVITY_URDF:-$REPO/urdf/openarm_v10_bimanual.urdf}"
+# ---- Bilateral feedback (leader, opt-in・2026-10-19) ---------------------------
+# 既定 false（従来どおり重力補償のみ）。true にすると lerobot-record の ~30Hz ループ内で
+# follower の現在角へ向けた弱い位置引き込みを追加する（C++ 版 bilateral_step の近似。
+# ~500Hz の専用ループではなく 30Hz のデータ収集ループに相乗りさせているため本物より緩い・
+# もたつく・振動しうる）。ゲインは lerobot 側の config_openarm_leader.py の
+# bilateral_kp/bilateral_kd（未調整の初期値）。実機で弱いところから確認すること。
+BILATERAL_FEEDBACK="${BILATERAL_FEEDBACK:-false}"
+# 2026-10-21: true で起動時の整列・a/自動の戻し・終了時の戻しを左右同時に動かす（各腕は別の CAN バス）。
+# 既定は false（左→右の順）。左右の経路が互いに干渉しないかは確認していないので、初回は dry で目視する。
+PARALLEL_ARMS="${PARALLEL_ARMS:-false}"
+case "$PARALLEL_ARMS" in true|false) ;; *) echo "[record-bi] PARALLEL_ARMS must be 'true' or 'false', got '$PARALLEL_ARMS'" >&2; exit 1 ;; esac
+# 2026-10-24: true で同じ 3 つの場面の leader と follower も同時に動かす（従来は follower→leader /
+# leader→follower の順）。PARALLEL_ARMS=true と合わせると 4 本が同時に動く。既定は false。
+# leader がソフトで動かせない（脱力の manual_control）ときの戻しは従来どおり何も動かさない。
+PARALLEL_LEADER_FOLLOWER="${PARALLEL_LEADER_FOLLOWER:-false}"
+case "$PARALLEL_LEADER_FOLLOWER" in true|false) ;; *) echo "[record-bi] PARALLEL_LEADER_FOLLOWER must be 'true' or 'false', got '$PARALLEL_LEADER_FOLLOWER'" >&2; exit 1 ;; esac
+# グリッパーの左右別ゲイン上書き（2026-10-19・空なら lerobot 側の既定値のまま＝CLIに渡さない）。
+# 実機確認で左右の感触差があった（can_fol_l に CAN LOST/BACK の既往あり。個体差の可能性も）。
+# 例: L_BILATERAL_GRIPPER_KP=1.0 L_BILATERAL_GRIPPER_KD=0.06 で左だけ弱める
+L_BILATERAL_GRIPPER_KP="${L_BILATERAL_GRIPPER_KP:-}"
+L_BILATERAL_GRIPPER_KD="${L_BILATERAL_GRIPPER_KD:-}"
+R_BILATERAL_GRIPPER_KP="${R_BILATERAL_GRIPPER_KP:-}"
+R_BILATERAL_GRIPPER_KD="${R_BILATERAL_GRIPPER_KD:-}"
+BILATERAL_GRIPPER_ARGS=()
+[ -n "$L_BILATERAL_GRIPPER_KP" ] && BILATERAL_GRIPPER_ARGS+=(--teleop.left_arm_config.bilateral_gripper_kp="$L_BILATERAL_GRIPPER_KP")
+[ -n "$L_BILATERAL_GRIPPER_KD" ] && BILATERAL_GRIPPER_ARGS+=(--teleop.left_arm_config.bilateral_gripper_kd="$L_BILATERAL_GRIPPER_KD")
+[ -n "$R_BILATERAL_GRIPPER_KP" ] && BILATERAL_GRIPPER_ARGS+=(--teleop.right_arm_config.bilateral_gripper_kp="$R_BILATERAL_GRIPPER_KP")
+[ -n "$R_BILATERAL_GRIPPER_KD" ] && BILATERAL_GRIPPER_ARGS+=(--teleop.right_arm_config.bilateral_gripper_kd="$R_BILATERAL_GRIPPER_KD")
 # follower の起動時の整列に重力補償を足す（2026-10-01・lerobot 7afe1623）。無いと整列の弱いゲインで
 # 重力の分（肩で約 6°）下がって終わり、ループ開始で跳ね上がる。ALIGN_GRAVITY=false で従来どおり。
 ALIGN_GRAVITY="${ALIGN_GRAVITY:-true}"
@@ -497,13 +562,22 @@ fi
 #                           最初のフレームで follower が leader の位置へ 1 歩で動くため。a で戻し直す。
 #   SAVE_ON_RETURN=true     a の戻しが済んだ時点で前のテイクを保存する。右矢印は開始だけになる。
 #                           破棄（左矢印）は a を押す前だけ効く。
+#   SAVE_ON_EPISODE_END=true  2026-10-19追加。そのエピソードの録画が終わった瞬間（右矢印か時間切れ）に
+#                           保存する。a を待たないので SAVE_ON_RETURN よりさらに早い。ハング・クラッシュで
+#                           撮れたテイクを失わないための安全策(このリポでCtrl-Cが効かないD-stateハングが
+#                           既往)。破棄（左矢印）はこれが有効な間は常に効かない（SAVE_ON_RETURNより優先）。
+#   RETURN_ON_EPISODE_END=true  2026-10-21追加。録画を終えた右矢印（か時間切れ）で保存し、そのまま両腕を
+#                           開始姿勢へ戻す（a は不要）。録画中の左矢印は破棄して戻す。どちらも戻り終わったら
+#                           次の右矢印で開始するだけ。SAVE_ON_EPISODE_END / SAVE_ON_RETURN より優先。
 #   START_COUNTDOWN_S=3     右矢印（保存が挟まるときはその終わり）から録画の最初のフレームまで、1 秒ごとに
 #                           1 行と端末のベルで秒読みする。0 で秒読みなし。
 START_POSE_HOLD="${START_POSE_HOLD:-false}"
 SAVE_ON_RETURN="${SAVE_ON_RETURN:-false}"
+SAVE_ON_EPISODE_END="${SAVE_ON_EPISODE_END:-false}"
+RETURN_ON_EPISODE_END="${RETURN_ON_EPISODE_END:-false}"
 START_COUNTDOWN_S="${START_COUNTDOWN_S:-0}"
 START_POSE_HANDOFF_DEG="${START_POSE_HANDOFF_DEG:-15}"
-for _v in START_POSE_HOLD SAVE_ON_RETURN; do
+for _v in START_POSE_HOLD SAVE_ON_RETURN SAVE_ON_EPISODE_END RETURN_ON_EPISODE_END; do
   case "${!_v}" in
     true|false) ;;
     *) echo "[record-bi] $_v must be 'true' or 'false', got '${!_v}'" >&2; exit 1 ;;
@@ -519,6 +593,12 @@ if [ "$EPISODE_ADVANCE" = "manual" ]; then
   if [ "$SAVE_ON_RETURN" = "true" ]; then
     GATE_ARGS+=(--save_on_return=true)
   fi
+  if [ "$SAVE_ON_EPISODE_END" = "true" ]; then
+    GATE_ARGS+=(--save_on_episode_end=true)
+  fi
+  if [ "$RETURN_ON_EPISODE_END" = "true" ]; then
+    GATE_ARGS+=(--return_on_episode_end=true)
+  fi
   if [ "$START_COUNTDOWN_S" != "0" ]; then
     GATE_ARGS+=(--start_countdown_s="$START_COUNTDOWN_S")
   fi
@@ -531,16 +611,44 @@ fi
   echo "[record-bi] cameras=$CAMERAS"
   echo "[record-bi] d405: $( [ -n "${D405_GAIN:-}" ] && echo "manual exposure=${D405_EXPOSURE:-28000}us gain=$D405_GAIN（camera_setup.py で焼き済み）" || echo "auto exposure（既定。垂らし姿勢で床を見る向きだけ暗く出る）" )"
   echo "[record-bi] d435: auto exposure, brightness=${D435_BRIGHTNESS:-0}"
+  [ -n "$TASK_ID" ] && echo "[record-bi] task=$TASK_ID  issue=$ISSUE  external_id=$EXTERNAL_ID  condition_version=$CONDITION_VERSION"
   echo "[record-bi] obs=$OBS  repo_id=$REPO_ID  resume=$RESUME  root=${DATASET_ROOT:-<default>}  play_sounds=$PLAY_SOUNDS  episodes(this session)=$NUM_EPISODES  ${CAMERA_W}x${CAMERA_H}@${FPS}fps"
-  echo "[record-bi] gravity_comp=$GRAVITY_COMP L=$LSCALE R=$RSCALE urdf=$GRAVITY_URDF"
+  if [ "$PLAY_SOUNDS" = "true" ]; then
+    echo "[record-bi] 通知音の意味(espeak-ngの日本語読み上げは聞き取れないため2026-10-19に音へ切替):"
+    echo "[record-bi]   camera-shutter = 録画開始 / message = 操作が必要(開始姿勢へ戻す・シーンを整える) / complete = 完了(腕が戻った・録画終了) / dialog-warning = 録り直し / service-logout = 終了"
+  fi
+  echo "[record-bi] gravity_comp=$GRAVITY_COMP L=$LSCALE R=$RSCALE urdf=$GRAVITY_URDF  bilateral_feedback=$BILATERAL_FEEDBACK(近似・30Hzループ・未調整ゲイン)"
   echo "[record-bi] episode_advance=$EPISODE_ADVANCE"
   echo "[record-bi] dmlog=$(_dmlog_enabled && echo "on ifaces=${DMLOG_IFACES:-$FOLLOWER_L $FOLLOWER_R $LEADER_L $LEADER_R}" || echo off)"
   if [ "$EPISODE_ADVANCE" = "manual" ]; then
-    echo "[record-bi]   起動時: follower L→R, leader L→R の順に各 2.2 秒ずつ自動整列する(約 9 秒)。connect 前に両腕と机から手を引くこと"
-    echo "[record-bi]   エピソード終了後: a = 両腕を開始姿勢へ戻す -> 環境を整える -> 右矢印 = 次を開始"
-    echo "[record-bi]   左矢印 = 直前のテイクを破棄して録り直す / esc = 収集終了"
-    echo "[record-bi]   a を押す前に両腕と机から手を引くこと（leader 左→右が各 2.0 秒、続いて follower 両腕 1.5 秒＝約 5.5 秒両腕が自律動作する）"
-    echo "[record-bi]   開始姿勢での保持=$START_POSE_HOLD（受け渡しの上限 ${START_POSE_HANDOFF_DEG}deg）  a の時点で保存=$SAVE_ON_RETURN  開始の秒読み=${START_COUNTDOWN_S}s"
+    if [ "$PARALLEL_ARMS" = "true" ] && [ "$PARALLEL_LEADER_FOLLOWER" = "true" ]; then
+      echo "[record-bi]   起動時: follower・leader の 4 本が同時に自動整列する（PARALLEL_ARMS=true・PARALLEL_LEADER_FOLLOWER=true）。connect 前に両腕と机から手を引くこと"
+    elif [ "$PARALLEL_ARMS" = "true" ]; then
+      echo "[record-bi]   起動時: follower 両腕 → leader 両腕の順に、左右同時に自動整列する（PARALLEL_ARMS=true）。connect 前に両腕と机から手を引くこと"
+    else
+      echo "[record-bi]   起動時: follower L→R, leader L→R の順に 1 本ずつ自動整列する。connect 前に両腕と机から手を引くこと"
+    fi
+    if [ "$RETURN_ON_EPISODE_END" = "true" ]; then
+      echo "[record-bi]   右矢印 = 録画開始 / 録画中の右矢印 = 保存して両腕を開始姿勢へ戻す / 録画中の左矢印 = 破棄して戻す（a は不要）"
+      echo "[record-bi]   戻り終わったら環境を整えて右矢印 = 次を開始 / esc = 録画中のテイクを保存して収集終了"
+    else
+      echo "[record-bi]   エピソード終了後: a = 両腕を開始姿勢へ戻す -> 環境を整える -> 右矢印 = 次を開始"
+    fi
+    if [ "$RETURN_ON_EPISODE_END" = "true" ]; then
+      :
+    elif [ "$SAVE_ON_EPISODE_END" = "true" ]; then
+      echo "[record-bi]   左矢印は効かない（SAVE_ON_EPISODE_END=true: 録画終了の瞬間に保存済み・破棄は不可） / esc = 収集終了"
+    else
+      echo "[record-bi]   左矢印 = 直前のテイクを破棄して録り直す / esc = 収集終了"
+    fi
+    if [ "$PARALLEL_ARMS" = "true" ] && [ "$PARALLEL_LEADER_FOLLOWER" = "true" ]; then
+      echo "[record-bi]   開始姿勢へ戻す前に両腕と机から手を引くこと（leader・follower の 4 本が同時に動く＝約 2.0 秒両腕が自律動作する）"
+    elif [ "$PARALLEL_ARMS" = "true" ]; then
+      echo "[record-bi]   開始姿勢へ戻す前に両腕と机から手を引くこと（leader 両腕を同時に 2.0 秒、続いて follower 両腕 1.5 秒＝約 3.5 秒両腕が自律動作する）"
+    else
+      echo "[record-bi]   開始姿勢へ戻す前に両腕と机から手を引くこと（leader 左→右が各 2.0 秒、続いて follower 両腕 1.5 秒＝約 5.5 秒両腕が自律動作する）"
+    fi
+    echo "[record-bi]   開始姿勢での保持=$START_POSE_HOLD（受け渡しの上限 ${START_POSE_HANDOFF_DEG}deg）  a の時点で保存=$SAVE_ON_RETURN  録画終了時に保存=$SAVE_ON_EPISODE_END  開始の秒読み=${START_COUNTDOWN_S}s"
     if [ "$START_POSE_HOLD" = "true" ]; then
       echo "[record-bi]   保持: 起動直後と a の後は、次の録画が始まるまで両腕が開始姿勢で止まる（leader は軽い力で保持・放してよい）"
       echo "[record-bi]   保持が解けるのは録画の最初のフレーム。右矢印を押したら leader の両方のグリップを握って待つ"
@@ -582,6 +690,9 @@ MANIFEST_ARGS=(
   --repo-root "$REPO"
   --fps "$FPS"
 )
+if [ -n "$TASK_ID" ]; then  # タスクの台帳があり課題コードで録るときだけ（manifest の task_ledger）
+  MANIFEST_ARGS+=(--task-id "$TASK_ID" --issue "$ISSUE" --external-id "$EXTERNAL_ID" --condition-version "$CONDITION_VERSION")
+fi
 if [ "$WRIST_RIGHT" = "true" ]; then
   MANIFEST_ARGS+=(--wrist-right-serial "$WRIST_RIGHT_SERIAL")
 fi
@@ -624,13 +735,16 @@ COMMAND_SH="$RUN_DIR/command.sh"
   printf 'PLAY_SOUNDS=%q DISPLAY_IP=%q DISPLAY_PORT=%q \\\n' "$PLAY_SOUNDS" "$DISPLAY_IP" "$DISPLAY_PORT"
   printf 'D405_GAIN=%q D405_EXPOSURE=%q D435_BRIGHTNESS=%q \\\n' "${D405_GAIN:-}" "${D405_EXPOSURE:-}" "${D435_BRIGHTNESS:-}"
   printf 'TASK=%q \\\n' "$TASK"
-  printf 'TASK_SLUG=%q \\\n' "$TASK_SLUG"
+  printf 'TASK_SLUG=%q ISSUE=%q \\\n' "$TASK_SLUG" "$ISSUE"
   printf 'GRAVITY_COMP=%q LSCALE=%q RSCALE=%q GRAVITY_URDF=%q ALIGN_GRAVITY=%q \\\n' "$GRAVITY_COMP" "$LSCALE" "$RSCALE" "$GRAVITY_URDF" "$ALIGN_GRAVITY"
+  printf 'BILATERAL_FEEDBACK=%q PARALLEL_ARMS=%q PARALLEL_LEADER_FOLLOWER=%q \\\n' "$BILATERAL_FEEDBACK" "$PARALLEL_ARMS" "$PARALLEL_LEADER_FOLLOWER"
+  printf 'L_BILATERAL_GRIPPER_KP=%q L_BILATERAL_GRIPPER_KD=%q R_BILATERAL_GRIPPER_KP=%q R_BILATERAL_GRIPPER_KD=%q \\\n' \
+    "$L_BILATERAL_GRIPPER_KP" "$L_BILATERAL_GRIPPER_KD" "$R_BILATERAL_GRIPPER_KP" "$R_BILATERAL_GRIPPER_KD"
   printf 'GRIPPER_KP=%q ARM_KP=%q \\\n' "$GRIPPER_KP" "$ARM_KP"
   printf 'EPISODE_ADVANCE=%q START_POSE_TOL_DEG=%q START_POSE_MAX_WAIT_S=%q \\\n' \
     "$EPISODE_ADVANCE" "$START_POSE_TOL_DEG" "$START_POSE_MAX_WAIT_S"
-  printf 'START_POSE_HOLD=%q START_POSE_HANDOFF_DEG=%q SAVE_ON_RETURN=%q START_COUNTDOWN_S=%q \\\n' \
-    "$START_POSE_HOLD" "$START_POSE_HANDOFF_DEG" "$SAVE_ON_RETURN" "$START_COUNTDOWN_S"
+  printf 'START_POSE_HOLD=%q START_POSE_HANDOFF_DEG=%q SAVE_ON_RETURN=%q SAVE_ON_EPISODE_END=%q RETURN_ON_EPISODE_END=%q START_COUNTDOWN_S=%q \\\n' \
+    "$START_POSE_HOLD" "$START_POSE_HANDOFF_DEG" "$SAVE_ON_RETURN" "$SAVE_ON_EPISODE_END" "$RETURN_ON_EPISODE_END" "$START_COUNTDOWN_S"
   printf 'DISPLAY_DATA=%q \\\n' "$DISPLAY_DATA"
   printf 'bash scripts/record_bimanual_openarm.sh %q\n' "$TAG"
 } > "$COMMAND_SH"
@@ -664,6 +778,8 @@ set +e
   --robot.right_arm_config.port="$FOLLOWER_R" --robot.right_arm_config.side=right \
   ${ALIGN_GRAVITY_ARGS[@]+"${ALIGN_GRAVITY_ARGS[@]}"} \
   --robot.id=follower \
+  --robot.parallel_arms="$PARALLEL_ARMS" --teleop.parallel_arms="$PARALLEL_ARMS" \
+  --parallel_leader_follower="$PARALLEL_LEADER_FOLLOWER" \
   --robot.cameras="$CAMERAS" \
   --teleop.type=bi_openarm_leader \
   --teleop.left_arm_config.port="$LEADER_L" \
@@ -671,6 +787,8 @@ set +e
   --teleop.id=leader \
   --teleop.left_arm_config.gravity_compensation="$GRAVITY_COMP" --teleop.left_arm_config.gravity_urdf_path="$GRAVITY_URDF" --teleop.left_arm_config.gravity_side=left --teleop.left_arm_config.gravity_scale="$LSCALE" \
   --teleop.right_arm_config.gravity_compensation="$GRAVITY_COMP" --teleop.right_arm_config.gravity_urdf_path="$GRAVITY_URDF" --teleop.right_arm_config.gravity_side=right --teleop.right_arm_config.gravity_scale="$RSCALE" \
+  --teleop.left_arm_config.bilateral_feedback="$BILATERAL_FEEDBACK" --teleop.right_arm_config.bilateral_feedback="$BILATERAL_FEEDBACK" \
+  ${BILATERAL_GRIPPER_ARGS[@]+"${BILATERAL_GRIPPER_ARGS[@]}"} \
   --display_data="$DISPLAY_DATA" \
   ${DISPLAY_ARGS[@]+"${DISPLAY_ARGS[@]}"} \
   --resume="$RESUME" \

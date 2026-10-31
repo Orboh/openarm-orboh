@@ -122,6 +122,12 @@ class _MsgSerializer:
     def _decode(obj):
         if isinstance(obj, dict) and "__ndarray_class__" in obj:
             return np.load(io.BytesIO(obj["as_npy"]), allow_pickle=False)
+        # Isaac-GR00T 51d4c89（2026-08-20）以降のサーバは msgpack_numpy 形式（キーが bytes）で返す。
+        # kind が空（通常の数値型）のときだけ生バイト列から組み立てる。'O'（pickle）や構造化型は受けない。
+        if isinstance(obj, dict) and obj.get(b"nd") is True:
+            if obj.get(b"kind") not in (b"", ""):
+                raise ValueError(f"PolicyServer が非数値の ndarray を返した（kind={obj.get(b'kind')!r}）")
+            return np.frombuffer(obj[b"data"], dtype=np.dtype(obj[b"type"])).reshape(obj[b"shape"])
         return obj
 
 

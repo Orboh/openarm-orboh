@@ -63,7 +63,10 @@ def main() -> int:
     ap.add_argument("--d405-gain", type=int, help="D405 を手動露出＋このゲインに（16..248）")
     ap.add_argument("--d405-exposure", type=int, default=28000, help="D405 手動露出 [us]。33000 だと読み出しが間に合わず 15fps に落ちる（実測）。28000 で 30fps")
     ap.add_argument("--d435-brightness", type=int, help="D435i の brightness オフセット（-64..64。自動露出のまま底上げ。24 で平均 122→151、40 で 169）")
+    ap.add_argument("--d435-gain", type=int, help="D435i を手動露出＋このゲインに（brightness オフセットで足りない白飛び対策）")
+    ap.add_argument("--d435-exposure", type=int, default=100, help="D435i 手動露出 [us相当の内部単位]。小さいほど暗い。既定 100（自動時の166より短い）")
     ap.add_argument("--d405-auto", action="store_true", help="D405 を自動露出へ戻す")
+    ap.add_argument("--d435-auto", action="store_true", help="D435i を自動露出へ戻す（brightness も 0 に）")
     ap.add_argument("--serial", action="append", help="対象シリアル（省略時は全 D405）")
     args = ap.parse_args()
 
@@ -84,9 +87,19 @@ def main() -> int:
         is_d405 = "D405" in name
         is_d435 = "D435" in name
         target = is_d405 and (not args.serial or serial in args.serial)
-        if is_d435 and args.d435_brightness is not None and (not args.serial or serial in args.serial):
+        d435_target = is_d435 and (not args.serial or serial in args.serial)
+        if d435_target and args.d435_brightness is not None:
             ok = setopt(s, rs.option.enable_auto_exposure, 1)
             ok &= setopt(s, rs.option.brightness, float(args.d435_brightness))
+            rc |= 0 if ok else 1
+        if d435_target and args.d435_gain is not None:
+            ok = setopt(s, rs.option.enable_auto_exposure, 0)
+            ok &= setopt(s, rs.option.exposure, float(args.d435_exposure))
+            ok &= setopt(s, rs.option.gain, float(args.d435_gain))
+            rc |= 0 if ok else 1
+        elif d435_target and args.d435_auto:
+            ok = setopt(s, rs.option.brightness, 0.0)
+            ok &= setopt(s, rs.option.enable_auto_exposure, 1)
             rc |= 0 if ok else 1
         if target and args.d405_gain is not None:
             ok = setopt(s, rs.option.enable_auto_exposure, 0)
