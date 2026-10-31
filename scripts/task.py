@@ -3,9 +3,10 @@
 
 タスク = 1 つの仕事（指示文は 1 つ）。台帳に置くもの:
   タスク ID・題名・指示文（lang）・タスクファイル（env_file）・カメラ
-  課題リストと台帳の文書の場所（issue_list）と、このタスクの課題コード（issues。録る・録らないは台帳の状態で持つ）
+  課題リストの文書の場所（issue_list）・台帳の文書の場所（ledger。無ければ issue_list を台帳として見る）と、
+  このタスクの課題コード（issues。録る・録らないは台帳の状態で持つ）
   条件の版（v<N>.pose_set / v<N>.scene）と今の版（current_version）・名前の型
-命名則の正本は Orboh/doma-sorting-dev 07-collection/README.md「命名則」（2026-10-28）:
+命名則の正本は orboh-company-vault（写しは Orboh/doma-sorting-dev 07-collection/collection-naming-rules.md「命名則」・2026-10-28）:
   外に見せる ID   <タスク ID>_<課題コードを小文字>            例 takeei_wood_t1-l2
   データセット    Orboh/bi_openarm_<外に見せる ID>_<カメラ>_v<条件の版>
   モデル          Orboh/gr00t-bi-openarm-<外に見せる ID をハイフンに>-v<N>（混ぜたら <タスク>-mix）
@@ -128,8 +129,8 @@ class Task:
                                     cameras=self.get("cameras"), version=self.version, n=n)
 
     def ledger_path(self) -> Path | None:
-        """issue_list（<owner>/<repo>:<repo 内のパス>）→ 手元の clone の中のファイル。"""
-        ref = self.get("issue_list")
+        """台帳の文書（ledger。無ければ issue_list。<owner>/<repo>:<repo 内のパス>）→ 手元の clone の中のファイル。"""
+        ref = self.get("ledger") or self.get("issue_list")
         if ":" not in ref:
             return None
         repo, rel = ref.split(":", 1)
@@ -243,11 +244,11 @@ def cmd_check(a) -> int:
     elif code:
         lp = t.ledger_path()
         if lp is None:
-            warn.append("台帳に issue_list が無い（課題リストと台帳の文書の節を確かめられない）")
+            warn.append("台帳に ledger も issue_list も無い（台帳の文書の節を確かめられない）")
         elif not lp.is_file():
-            warn.append(f"課題リストと台帳の文書が手元に無いので節を確かめていない: {lp}（場所は TASK_LEDGER_DIR で変えられる）")
+            warn.append(f"台帳の文書が手元に無いので節を確かめていない: {lp}（場所は TASK_LEDGER_DIR で変えられる）")
         elif not ledger_has_section(lp.read_text(encoding="utf-8"), code):
-            warn.append(f"課題リストと台帳 {lp.name} に {code} の節がまだ無い（録ったら台帳に節を足す）")
+            warn.append(f"台帳 {lp.name} に {code} の節がまだ無い（録ったら台帳に節を足す）")
 
     for w in warn:
         print(f"[task] 注意: {w}", file=sys.stderr)

@@ -29,6 +29,7 @@ lang: Pick up the wood and place it in the box
 env_file: config/bimanual-collect.wood.env
 cameras: chest_wristr_wristl
 issue_list: Orboh/doma-sorting-dev:07-collection/wood-issue-list.md
+ledger: Orboh/doma-sorting-dev:07-collection/wood-ledger.md
 issues: T1-L0a,T1-L1,T1-L2,T2,T3-L1
 current_version: v2
 v1.pose_set: old-set
@@ -80,7 +81,7 @@ class Fixture(unittest.TestCase):
         self.write_set("new-set", "frozen", "desk-v1", sha12(SCENE))
         self.write_set("old-set", "frozen", "desk-v1", sha12(SCENE))
         (self.ledger / "07-collection").mkdir(parents=True)
-        (self.ledger / "07-collection/wood-issue-list.md").write_text(LEDGER, encoding="utf-8")
+        (self.ledger / "07-collection/wood-ledger.md").write_text(LEDGER, encoding="utf-8")
 
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
@@ -221,6 +222,13 @@ class TestCheck(Fixture):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("T2 の節がまだ無い", r.stderr)
 
+    def test_ledger_falls_back_to_issue_list(self):  # ledger の無いタスクは issue_list の文書を台帳として見る（2026-10-31 より前の形）
+        self.write("config/tasks/wood.yaml", TASK_YAML.replace("ledger: Orboh/doma-sorting-dev:07-collection/wood-ledger.md\n", ""))
+        (self.ledger / "07-collection/wood-ledger.md").rename(self.ledger / "07-collection/wood-issue-list.md")
+        r = self.task("check", "wood", "--issue", "T1-L1")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("節", r.stderr)
+
     def test_env_file_missing(self):
         (self.repo / "config/bimanual-collect.wood.env").unlink()
         r = self.task("check", "wood")
@@ -281,7 +289,7 @@ class TestRealRegistry(unittest.TestCase):
         self.assertEqual(out["model"], "Orboh/gr00t-bi-openarm-takeei-wood-t1-l2-v1")
         codes = [i["code"] for i in json.loads(self.run_real("list", "--json").stdout)["tasks"][0]["issues"]]
         self.assertEqual(codes, ["T1-L0a", "T1-L1", "T1-L2", "T1-L3", "T2", "T3-L1", "T3-L2", "T3-L3",
-                                 "T4-L1", "T4-L2", "T4-L3", "T5-L1", "T5-L2", "T5-L3"])
+                                 "T4", "T5-L1", "T5-L2", "T5-L3"])
 
 
 class TestCollectHook(Fixture):
