@@ -1,13 +1,15 @@
 # タスクの台帳。scripts/task.py が読む（1 行 1 キー・入れ子なし・PyYAML 不要）。書式と運用は config/tasks/README.md
-# 命名則の正本: Orboh/doma-sorting-dev 07-collection/README.md「命名則」（2026-10-28）
+# 命名則の正本は orboh-company-vault。共有の写しは Orboh/doma-sorting-dev 07-collection/collection-naming-rules.md「命名則」（2026-10-28・2026-10-31 に移した）
 task: takeei_wood
 title: タケエイ土間選別・木材（木のブロックを拾って木材の箱へ入れる）
 lang: Pick up the wood and place it in the box
 env_file: config/bimanual-collect.takeei_wood.env
 cameras: chest_wristr_wristl
 issue_list: Orboh/doma-sorting-dev:07-collection/wood-issue-list.md
-# このタスクの課題コード（定義は issue_list の文書。ここは一覧だけ。録る・録らないは台帳の状態で持つ）。T2 は木材では段を分けない
-issues: T1-L0a,T1-L1,T1-L2,T1-L3,T2,T3-L1,T3-L2,T3-L3,T4-L1,T4-L2,T4-L3,T5-L1,T5-L2,T5-L3
+# どのエピソードがどの課題コードかの台帳（2026-10-31 に課題リストから分けた）。task.py check はここで課題コードの節を探す
+ledger: Orboh/doma-sorting-dev:07-collection/wood-ledger.md
+# このタスクの課題コード（定義は issue_list の文書。ここは一覧だけ。録る・録らないは台帳の状態で持つ）。T2・T4 は木材では段を分けない
+issues: T1-L0a,T1-L1,T1-L2,T1-L3,T2,T3-L1,T3-L2,T3-L3,T4,T5-L1,T5-L2,T5-L3
 # 条件の版（開始姿勢セット・シーン・カメラのどれかが変わったら上げる）。current_version が今の版
 current_version: v2
 v1.pose_set: kitakyushu-wood-l1-v1

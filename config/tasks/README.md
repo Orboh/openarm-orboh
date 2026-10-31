@@ -4,7 +4,7 @@
 
 タスクファイル・開始姿勢セット・シーン YAML はそれぞれ別の場所にあり、以前は「今どの組で録るか」を人が覚えていた。組を取り違えると、別の条件のデータが同じ名前のデータセットに混ざる。ここに組を書き、`scripts/task.py check` が収集の前に突き合わせる。
 
-- 命名則の正本: 共有 repo `Orboh/doma-sorting-dev` の `07-collection/README.md`「命名則」（2026-10-28）。課題コードの定義と、どのエピソードをどのデータセットに入れたかの台帳は、各タスクの `issue_list` の文書
+- 命名則の正本は orboh-company-vault。共有の写しは `Orboh/doma-sorting-dev` の `07-collection/collection-naming-rules.md`「命名則」（2026-10-28・2026-10-31 に移した）。課題コードの定義は各タスクの `issue_list` の文書（課題リスト）、どのエピソードをどのデータセットに入れたかは `ledger` の文書（台帳・2026-10-31 に課題リストから分けた）。`ledger` が無いタスクは `issue_list` の文書を台帳として見る
 - 書式: `config/pose_sets/*/set.yaml` と同じ「1 行 1 キー・入れ子なし」（PyYAML 不要）。一覧はカンマ区切り、条件の版は `v<N>.pose_set` / `v<N>.scene` / `v<N>.note`
 
 ---
