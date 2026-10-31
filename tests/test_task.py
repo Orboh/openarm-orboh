@@ -288,7 +288,7 @@ class TestRealRegistry(unittest.TestCase):
         self.assertEqual(out["dataset"], "Orboh/bi_openarm_takeei_wood_t1-l2_chest_wristr_wristl_v2")
         self.assertEqual(out["model"], "Orboh/gr00t-bi-openarm-takeei-wood-t1-l2-v1")
         codes = [i["code"] for i in json.loads(self.run_real("list", "--json").stdout)["tasks"][0]["issues"]]
-        self.assertEqual(codes, ["T1-L0a", "T1-L1", "T1-L2", "T1-L3", "T2", "T3-L1", "T3-L2", "T3-L3",
+        self.assertEqual(codes, ["T1-L0a", "T1-L1", "T1-L2", "T1-L3", "T2", "T3-L0", "T3-L1", "T3-L2", "T3-L3", "T3-L4",
                                  "T4", "T5-L1", "T5-L2", "T5-L3"])
 
 
